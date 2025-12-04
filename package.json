@@ -1,0 +1,24 @@
+{
+  "name": "infoflow-picker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clean": "rimraf dist",
+    "build:chrome": "node scripts/build.mjs chrome",
+    "build:firefox": "node scripts/build.mjs firefox",
+    "build": "npm run clean && npm run build:chrome && npm run build:firefox",
+    "dev": "node scripts/build.mjs watch",
+    "version:bump": "node scripts/version.mjs",
+    "test": "echo \"No tests yet - add unit tests.\""
+  },
+  "dependencies": {
+    "webextension-polyfill": "^0.12.0"
+  },
+  "devDependencies": {
+    "chrome-webstore-upload-cli": "^3.4.4",
+    "esbuild": "^0.23.0",
+    "rimraf": "^6.0.1",
+    "web-ext": "^8.3.0"
+  }
+}

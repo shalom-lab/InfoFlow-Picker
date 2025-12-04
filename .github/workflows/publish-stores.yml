@@ -1,0 +1,68 @@
+name: Publish to Web Stores
+
+on:
+  # 手动触发：用于「把某个已发布的 tag 版本」推到商店
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      NODE_VERSION: '22'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find latest v* tag
+        id: tag
+        run: |
+          TAG=$(git describe --tags --abbrev=0 --match "v*")
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Using tag: $TAG"
+
+      - name: Checkout tag
+        run: git checkout ${{ steps.tag.outputs.tag }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Sync package.json version with tag
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: npm run version:bump
+
+      - name: Build extensions
+        run: npm run build
+
+      - name: Pack Chrome build
+        run: |
+          cd dist/chrome
+          zip -r "../../InfoFlow-Extractor-chrome-${{ steps.tag.outputs.version }}.zip" .
+
+      - name: Upload to Chrome Web Store
+        if: ${{ secrets.CHROME_EXTENSION_ID && secrets.CHROME_CLIENT_ID && secrets.CHROME_CLIENT_SECRET && secrets.CHROME_REFRESH_TOKEN }}
+        env:
+          EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+        run: |
+          npx chrome-webstore-upload-cli upload \
+            --extension-id "$EXTENSION_ID" \
+            --client-id "$CLIENT_ID" \
+            --client-secret "$CLIENT_SECRET" \
+            --refresh-token "$REFRESH_TOKEN" \
+            --source "InfoFlow-Extractor-chrome-${{ steps.tag.outputs.version }}.zip" \
+            --publish-target default
+
+

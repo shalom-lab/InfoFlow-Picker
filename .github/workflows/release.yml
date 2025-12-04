@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  # 只有推送 v* 形式的 tag 时自动触发
+  push:
+    tags:
+      - 'v*'
+  # 仍然保留手动触发（例如需要重跑一次）
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    # 双保险：仅在 v* tag 时跑
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    env:
+      NODE_VERSION: '22'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Capture version from tag
+        id: version
+        run: |
+          RAW="${GITHUB_REF_NAME}"   # e.g. v0.1.3
+          STRIPPED="${RAW#v}"        # -> 0.1.3
+          echo "value=${STRIPPED}" >> "$GITHUB_OUTPUT"
+
+      - name: Sync package.json version with tag
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: npm run version:bump
+
+      - name: Build extensions
+        run: npm run build
+
+      - name: Pack Chrome build
+        run: |
+          cd dist/chrome
+          zip -r "../../InfoFlow-Extractor-chrome-${{ steps.version.outputs.value }}.zip" .
+
+      - name: Pack Firefox build
+        run: |
+          cd dist/firefox
+          zip -r "../../InfoFlow-Extractor-firefox-${{ steps.version.outputs.value }}.zip" .
+
+      - name: Upload Chrome artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-${{ steps.version.outputs.value }}
+          path: InfoFlow-Extractor-chrome-${{ steps.version.outputs.value }}.zip
+
+      - name: Upload Firefox artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firefox-${{ steps.version.outputs.value }}
+          path: InfoFlow-Extractor-firefox-${{ steps.version.outputs.value }}.zip
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }} # 直接使用已有的 v* tag
+          name: InfoFlow Picker ${{ github.ref_name }}
+          files: |
+            InfoFlow-Extractor-chrome-${{ steps.version.outputs.value }}.zip
+            InfoFlow-Extractor-firefox-${{ steps.version.outputs.value }}.zip
