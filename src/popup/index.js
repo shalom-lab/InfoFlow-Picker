@@ -2,13 +2,18 @@ import browser from 'webextension-polyfill';
 import { getSettings, saveSettings, DEFAULT_CATEGORIES } from '../utils/storage.js';
 import { t } from '../i18n/index.js';
 
-const selectionEl = document.getElementById('selection');
+const contentEl = document.getElementById('content');
 const sourceUrlEl = document.getElementById('source-url');
-const notesEl = document.getElementById('notes');
 const categoryEl = document.getElementById('category');
+const notesEl = document.getElementById('notes');
 const saveBtn = document.getElementById('save-btn');
 const statusEl = document.getElementById('status');
 const optionsBtn = document.getElementById('options-btn');
+const imageInput = document.getElementById('image-input');
+const imageSelectBtn = document.getElementById('image-select-btn');
+const imagePreviewContainer = document.getElementById('image-preview-container');
+const imagePreview = document.getElementById('image-preview');
+const imageRemoveBtn = document.getElementById('image-remove-btn');
 
 // 视图元素
 const saveView = document.getElementById('save-view');
@@ -32,6 +37,8 @@ let saving = false;
 let isSettingsView = false;
 let statusState = { key: 'statusIdle', tone: 'muted' };
 let settingsStatusState = { key: '', tone: 'info' };
+let currentImageFile = null; // 存储图片文件对象或URL
+let currentImageUrl = null; // 存储图片URL（用于预览）
 
 init();
 
@@ -40,12 +47,21 @@ async function init() {
   currentLanguage = settings.language;
   applyTranslations();
   populateCategories(settings.categories);
+  
+  // 初始化图片状态
+  currentImageFile = null;
+  currentImageUrl = null;
+  imagePreviewContainer.style.display = 'none';
+  
   await Promise.all([loadSelectionFromPage(), loadSourceUrl()]);
   loadSettingsForm(settings);
   
   optionsBtn.addEventListener('click', toggleView);
   saveBtn.addEventListener('click', handleSave);
   saveSettingsBtn.addEventListener('click', handleSaveSettings);
+  imageSelectBtn.addEventListener('click', () => imageInput.click());
+  imageInput.addEventListener('change', handleImageSelect);
+  imageRemoveBtn.addEventListener('click', handleImageRemove);
   settingsLanguageEl.addEventListener('change', async () => {
     currentLanguage = settingsLanguageEl.value;
     await saveSettings({ language: currentLanguage });
@@ -73,22 +89,28 @@ function toggleView() {
 
 function applyTranslations() {
   document.getElementById('title').textContent = t(currentLanguage, 'appTitle');
-  document.getElementById('selection-label').textContent = t(
+  document.getElementById('content-label').textContent = t(
     currentLanguage,
-    'selectedTextLabel',
+    'contentLabel',
+  );
+  document.getElementById('category-label').textContent = t(
+    currentLanguage,
+    'categoryLabel',
   );
   document.getElementById('source-url-label').textContent = t(
     currentLanguage,
     'sourceUrlLabel',
   );
   sourceUrlEl.placeholder = t(currentLanguage, 'urlPlaceholder');
+  document.getElementById('image-label').textContent = t(
+    currentLanguage,
+    'imageLabel',
+  );
+  imageSelectBtn.textContent = t(currentLanguage, 'selectImageButton');
+  imageRemoveBtn.textContent = t(currentLanguage, 'removeImageButton');
   document.getElementById('notes-label').textContent = t(
     currentLanguage,
     'notesLabel',
-  );
-  document.getElementById('category-label').textContent = t(
-    currentLanguage,
-    'categoryLabel',
   );
   saveBtn.textContent = t(currentLanguage, 'saveButton');
   
@@ -121,6 +143,13 @@ function applyTranslations() {
     currentLanguage,
     'formatLabel',
   );
+  // 更新格式选项的文本
+  const formatSelect = document.getElementById('settings-format');
+  if (formatSelect && formatSelect.options.length >= 3) {
+    formatSelect.options[0].text = t(currentLanguage, 'formatJsonMd');
+    formatSelect.options[1].text = t(currentLanguage, 'formatJson');
+    formatSelect.options[2].text = t(currentLanguage, 'formatMd');
+  }
   document.getElementById('settings-categories-label').textContent = t(
     currentLanguage,
     'categoriesLabel',
@@ -152,9 +181,59 @@ async function loadSelectionFromPage() {
   const pending = await browser.storage.local.get([
     'pendingSelection',
     'pendingUrl',
+    'pendingImageUrl',
+    'pendingImageData',
   ]);
+  
+  // 处理图片右键
+  if (pending.pendingImageUrl) {
+    // 优先使用 base64 数据（如果有），因为预览更可靠
+    if (pending.pendingImageData?.base64) {
+      const base64Data = pending.pendingImageData.base64;
+      const mimeType = pending.pendingImageData.type || 'image/png';
+      currentImageUrl = `data:${mimeType};base64,${base64Data}`;
+      
+      // 存储图片数据对象，包含base64和类型信息
+      currentImageFile = {
+        base64: base64Data,
+        type: mimeType,
+      };
+    } else {
+      // 如果没有 base64，使用 URL（但预览可能因 CORS 失败）
+      currentImageUrl = pending.pendingImageUrl;
+      currentImageFile = pending.pendingImageUrl;
+      
+      // 添加预览错误处理
+      // 即使预览失败，保存仍然可以工作（background 的 fetch 不受 CORS 限制）
+      let previewErrorHandled = false;
+      imagePreview.onerror = () => {
+        if (!previewErrorHandled) {
+          previewErrorHandled = true;
+          console.log('Image preview failed (CORS), but save will work via background fetch');
+          // 可以显示一个提示，但为了不干扰用户体验，我们静默处理
+          // 因为保存功能仍然可以正常工作
+        }
+      };
+      
+      // 重置 onload，确保每次都能正确处理
+      imagePreview.onload = () => {
+        // 预览成功，清除可能的错误状态
+      };
+    }
+    
+    imagePreview.src = currentImageUrl;
+    imagePreviewContainer.style.display = 'block';
+    
+    if (pending.pendingUrl) {
+      sourceUrlEl.value = pending.pendingUrl;
+    }
+    await browser.storage.local.remove(['pendingImageUrl', 'pendingUrl', 'pendingImageData']);
+    return;
+  }
+  
+  // 处理文本选择
   if (pending.pendingSelection) {
-    selectionEl.value = pending.pendingSelection;
+    contentEl.value = pending.pendingSelection;
     if (pending.pendingUrl) {
       sourceUrlEl.value = pending.pendingUrl;
     }
@@ -182,11 +261,141 @@ async function loadSelectionFromPage() {
     const response = await browser.tabs.sendMessage(tab.id, {
       type: 'GET_SELECTION',
     });
-    selectionEl.value = response?.text ?? '';
+    contentEl.value = response?.text ?? '';
   } catch (error) {
     // 某些页面不注入 content script 时忽略错误，保留手动输入
-    selectionEl.value = '';
+    contentEl.value = '';
   }
+}
+
+function handleImageSelect(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  if (!file.type.startsWith('image/')) {
+    setStatus('invalidImage', 'error');
+    return;
+  }
+  
+  // 读取文件并转换为PNG格式
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      // 使用Canvas转换为PNG
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      
+      // 转换为PNG格式的blob
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          setStatus('invalidImage', 'error');
+          return;
+        }
+        
+        // 调试：检查blob大小
+        console.log('PNG blob size:', blob.size, 'Canvas size:', canvas.width, 'x', canvas.height);
+        if (blob.size === 0) {
+          setStatus('invalidImage', 'error');
+          console.error('Blob is empty after canvas conversion');
+          return;
+        }
+        
+        // 直接将blob转换为ArrayBuffer并存储，避免File对象可能的问题
+        blob.arrayBuffer().then((arrayBuffer) => {
+          console.log('Blob ArrayBuffer size:', arrayBuffer.byteLength);
+          if (arrayBuffer.byteLength === 0) {
+            setStatus('invalidImage', 'error');
+            console.error('ArrayBuffer is empty');
+            return;
+          }
+          
+          // 存储ArrayBuffer（转换为数组以便后续序列化）
+          const uint8Array = new Uint8Array(arrayBuffer);
+          currentImageFile = {
+            arrayBuffer: Array.from(uint8Array),
+            type: 'image/png',
+            size: blob.size,
+          };
+          console.log('Stored array length:', currentImageFile.arrayBuffer.length);
+          
+          // 显示预览
+          currentImageUrl = URL.createObjectURL(blob);
+          // 重置错误处理（blob URL 通常不会有 CORS 问题，但为了安全起见）
+          imagePreview.onerror = null;
+          imagePreview.onload = null;
+          imagePreview.src = currentImageUrl;
+          imagePreviewContainer.style.display = 'block';
+        }).catch((error) => {
+          console.error('Failed to process blob:', error);
+          setStatus('invalidImage', 'error');
+        });
+      }, 'image/png');
+    };
+    img.onerror = () => {
+      setStatus('invalidImage', 'error');
+    };
+    img.src = e.target.result;
+  };
+  reader.onerror = () => {
+    setStatus('invalidImage', 'error');
+  };
+  reader.readAsDataURL(file);
+}
+
+function handleImageRemove() {
+  // 如果currentImageUrl是blob URL，需要释放
+  if (currentImageUrl && currentImageUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(currentImageUrl);
+  }
+  currentImageFile = null;
+  currentImageUrl = null;
+  imagePreviewContainer.style.display = 'none';
+  imageInput.value = '';
+}
+
+// 将图片URL转换为PNG格式的ArrayBuffer（带超时和CORS错误检测）
+// 注意：此函数现在主要用于兼容性，实际应该直接使用URL让background下载
+async function convertImageUrlToPng(imageUrl) {
+  return new Promise((resolve, reject) => {
+    // 添加超时机制（8秒）
+    const timeout = setTimeout(() => {
+      const error = new Error('Image conversion timeout');
+      error.isTimeout = true;
+      reject(error);
+    }, 8000);
+    
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      clearTimeout(timeout);
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          const error = new Error('Failed to convert image to PNG (CORS issue)');
+          error.isCorsError = true;
+          reject(error);
+          return;
+        }
+        blob.arrayBuffer().then(resolve).catch(reject);
+      }, 'image/png');
+    };
+    img.onerror = () => {
+      clearTimeout(timeout);
+      const error = new Error('Failed to load image (CORS or network issue)');
+      error.isCorsError = true;
+      reject(error);
+    };
+    img.src = imageUrl;
+  });
 }
 
 async function loadSourceUrl() {
@@ -201,30 +410,124 @@ async function loadSourceUrl() {
 
 async function handleSave() {
   if (saving) return;
-  const text = selectionEl.value.trim();
+  
+  const content = contentEl.value.trim();
   const category = categoryEl.value;
-  const sourceUrl = sourceUrlEl.value.trim();
+  const url = sourceUrlEl.value.trim();
   const notes = notesEl.value.trim();
-  if (!text) {
-    setStatus('emptySelection', 'error');
+  
+  // 至少需要content或image之一
+  if (!content && !currentImageFile) {
+    setStatus('emptyContent', 'error');
     return;
   }
-
+  
   saving = true;
   saveBtn.disabled = true;
   setStatus('statusSaving', 'progress');
+  
   try {
+    // 准备图片数据
+    let imageData = null;
+    if (currentImageFile) {
+      if (typeof currentImageFile === 'string') {
+        // 如果是URL字符串，直接传给background下载（更快，避免在popup中转换）
+        // background script 的 fetch 不受 Canvas CORS 限制，可以直接下载
+        console.log('Using URL for direct download (faster):', currentImageFile);
+        imageData = { url: currentImageFile };
+      } else if (currentImageFile.base64) {
+        // 如果是从页面获取的base64数据，直接使用
+        try {
+          // 将base64转换为ArrayBuffer
+          const binaryString = atob(currentImageFile.base64);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          // ArrayBuffer不能直接通过消息传递，需要转换为数组
+          const uint8Array = new Uint8Array(bytes.buffer);
+          imageData = {
+            arrayBuffer: Array.from(uint8Array), // 转换为普通数组以便序列化
+            type: currentImageFile.type || 'image/png',
+          };
+        } catch (error) {
+          console.error('Failed to process base64 image data:', error);
+          // 如果base64处理失败，尝试使用URL（如果有）
+          if (currentImageUrl && currentImageUrl.startsWith('http')) {
+            imageData = { url: currentImageUrl };
+          } else {
+            throw new Error('Failed to process image data');
+          }
+        }
+      } else if (currentImageFile.arrayBuffer) {
+        // 如果已经有ArrayBuffer（可能是数组格式）
+        // 确保是数组格式以便序列化
+        const arr = Array.isArray(currentImageFile.arrayBuffer) 
+          ? currentImageFile.arrayBuffer 
+          : Array.from(new Uint8Array(currentImageFile.arrayBuffer));
+        imageData = {
+          arrayBuffer: arr,
+          type: currentImageFile.type || 'image/png',
+        };
+      } else if (currentImageFile instanceof File || (currentImageFile.constructor && currentImageFile.constructor.name === 'File')) {
+        // 如果是File对象，应该已经是PNG格式了（在handleImageSelect中已转换）
+        try {
+          const arrayBuffer = await currentImageFile.arrayBuffer();
+          // 调试：检查ArrayBuffer大小
+          console.log('File ArrayBuffer size:', arrayBuffer.byteLength, 'File size:', currentImageFile.size);
+          if (arrayBuffer.byteLength === 0) {
+            throw new Error('File ArrayBuffer is empty');
+          }
+          // ArrayBuffer不能直接通过消息传递，需要转换为数组
+          const uint8Array = new Uint8Array(arrayBuffer);
+          const arrayData = Array.from(uint8Array);
+          console.log('Converted array length:', arrayData.length);
+          if (arrayData.length === 0) {
+            throw new Error('Converted array is empty');
+          }
+          imageData = {
+            arrayBuffer: arrayData, // 转换为普通数组以便序列化
+            type: 'image/png', // 统一为PNG
+          };
+        } catch (error) {
+          console.error('Failed to read File object:', error);
+          throw new Error('Failed to read image file');
+        }
+      } else {
+        // 未知的图片文件类型
+        console.error('Unknown image file type:', typeof currentImageFile, currentImageFile);
+        throw new Error('Invalid image file format');
+      }
+    }
+    
     await browser.runtime.sendMessage({
       type: 'SAVE_SELECTION',
-      payload: { text, category, url: sourceUrl, notes },
+      payload: {
+        content,
+        category,
+        url,
+        notes,
+        image: imageData,
+      },
     });
+    
     setStatus('statusSuccess', 'success');
+    
+    // 清空表单
+    setTimeout(() => {
+      contentEl.value = '';
+      notesEl.value = '';
+      handleImageRemove();
+    }, 1500);
   } catch (error) {
-    console.error(error);
-    setStatus(
-      error?.message?.includes('GitHub') ? 'missingGithub' : 'statusError',
-      'error',
-    );
+    console.error('Save error:', error);
+    // 显示更详细的错误信息
+    if (error?.message?.includes('GitHub')) {
+      console.error('GitHub configuration issue:', error.message);
+      setStatus('missingGithub', 'error');
+    } else {
+      setStatus('statusError', 'error');
+    }
   } finally {
     saving = false;
     saveBtn.disabled = false;
@@ -243,7 +546,7 @@ function loadSettingsForm(settings) {
   settingsGithubRepoEl.value = settings.github.repo;
   settingsGithubBranchEl.value = settings.github.branch;
   settingsGithubBasePathEl.value = settings.github.basePath;
-  settingsFormatEl.value = settings.outputFormat || 'md';
+  settingsFormatEl.value = settings.outputFormats || 'json+md';
   settingsCategoriesEl.value = (settings.categories?.length
     ? settings.categories
     : DEFAULT_CATEGORIES
@@ -260,7 +563,7 @@ async function handleSaveSettings() {
   try {
     await saveSettings({
       language: settingsLanguageEl.value,
-      outputFormat: settingsFormatEl.value,
+      outputFormats: settingsFormatEl.value,
       categories: categories.length ? categories : DEFAULT_CATEGORIES,
       github: {
         token: settingsGithubTokenEl.value.trim(),

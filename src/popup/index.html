@@ -56,7 +56,7 @@
         width: 100%;
         min-height: 110px;
         resize: vertical;
-        padding: 6px 8px;
+        padding: 8px 10px;
         border-radius: 8px;
         border: 1px solid #e5e7eb;
         background: #ffffff;
@@ -64,11 +64,16 @@
         box-sizing: border-box;
         margin-bottom: 8px;
         font-size: 12px;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        font-family: inherit;
+      }
+      textarea:hover {
+        border-color: #cbd5e1;
       }
       textarea:focus {
         outline: none;
         border-color: #6366f1;
-        box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.55);
+        box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.2);
       }
       textarea.textarea-small {
         min-height: 44px;
@@ -86,6 +91,16 @@
         margin-bottom: 8px;
         background: #ffffff;
         color: #111827;
+        cursor: pointer;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+      select:hover {
+        border-color: #cbd5e1;
+      }
+      select:focus {
+        outline: none;
+        border-color: #6366f1;
+        box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.55);
       }
       button {
         margin-top: 4px;
@@ -156,25 +171,30 @@
         gap: 4px;
       }
       .icon-button {
-        width: 26px;
-        height: 26px;
-        border-radius: 999px;
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
         border: 1px solid #e5e7eb;
-        background: rgba(255, 255, 255, 0.9);
+        background: rgba(255, 255, 255, 0.95);
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        font-size: 13px;
+        font-size: 14px;
         cursor: pointer;
         color: #4b5563;
-        box-shadow: 0 2px 4px rgba(15, 23, 42, 0.12);
+        box-shadow: 0 2px 4px rgba(15, 23, 42, 0.1);
+        transition: all 0.2s ease;
       }
       .icon-button:hover {
-        background: #f3f4f6;
+        background: #f8fafc;
+        border-color: #cbd5e1;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px rgba(15, 23, 42, 0.15);
       }
       .icon-button:active {
-        background: #e5e7eb;
-        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.16);
+        background: #f1f5f9;
+        transform: translateY(0);
+        box-shadow: 0 2px 4px rgba(15, 23, 42, 0.12);
       }
       .view {
         display: none;
@@ -191,7 +211,7 @@
       input[type="text"],
       input[type="password"] {
         width: 100%;
-        padding: 6px 8px;
+        padding: 8px 10px;
         border-radius: 8px;
         border: 1px solid #e5e7eb;
         background: #ffffff;
@@ -199,15 +219,209 @@
         box-sizing: border-box;
         margin-bottom: 8px;
         font-size: 12px;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+      input[type="text"]:hover,
+      input[type="password"]:hover {
+        border-color: #cbd5e1;
       }
       input[type="text"]:focus,
       input[type="password"]:focus {
         outline: none;
         border-color: #6366f1;
-        box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.55);
+        box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.2);
       }
       .settings-categories {
         min-height: 80px;
+      }
+      #image-preview-container {
+        display: none;
+      }
+      #image-preview {
+        display: block;
+        max-width: 100%;
+        max-height: 200px;
+        border-radius: 8px;
+        border: 1px solid #e5e7eb;
+        object-fit: contain;
+        background: #f9fafb;
+      }
+      
+      /* 图片选择按钮美化 */
+      #image-select-btn {
+        width: 100%;
+        margin-bottom: 8px;
+        padding: 10px 12px;
+        font-size: 13px;
+        font-weight: 500;
+        background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+        border: 2px dashed #0ea5e9;
+        border-radius: 10px;
+        cursor: pointer;
+        color: #0369a1;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        box-shadow: 0 2px 4px rgba(14, 165, 233, 0.1);
+      }
+      #image-select-btn:hover {
+        background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+        border-color: #0284c7;
+        color: #075985;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(14, 165, 233, 0.15);
+      }
+      #image-select-btn:active {
+        transform: translateY(0);
+        box-shadow: 0 2px 4px rgba(14, 165, 233, 0.1);
+      }
+      #image-select-btn::before {
+        content: '📷 ';
+        font-size: 16px;
+        line-height: 1;
+      }
+      
+      /* 图片移除按钮美化 */
+      #image-remove-btn {
+        width: 100%;
+        padding: 8px 12px;
+        font-size: 12px;
+        font-weight: 500;
+        background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+        color: #dc2626;
+        border: 1px solid #fecaca;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        box-shadow: 0 2px 4px rgba(220, 38, 38, 0.1);
+      }
+      #image-remove-btn:hover {
+        background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+        border-color: #fca5a5;
+        color: #b91c1c;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(220, 38, 38, 0.15);
+      }
+      #image-remove-btn:active {
+        transform: translateY(0);
+        box-shadow: 0 2px 4px rgba(220, 38, 38, 0.1);
+      }
+      #image-remove-btn::before {
+        content: '🗑️ ';
+        font-size: 14px;
+        line-height: 1;
+      }
+      
+      /* 标签美化 */
+      label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 6px 0 4px;
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.01em;
+        color: #475569;
+      }
+      
+      /* 为不同标签添加图标 */
+      #content-label::before {
+        content: '📝';
+        font-size: 13px;
+      }
+      #category-label::before {
+        content: '📁';
+        font-size: 13px;
+      }
+      #source-url-label::before {
+        content: '🔗';
+        font-size: 13px;
+      }
+      #image-label::before {
+        content: '🖼️';
+        font-size: 13px;
+      }
+      #notes-label::before {
+        content: '📋';
+        font-size: 13px;
+      }
+      
+      /* 保存按钮美化 */
+      #save-btn {
+        background: linear-gradient(135deg, #4f46e5, #7c3aed);
+        border: none;
+        color: #ffffff;
+        font-weight: 600;
+        padding: 10px 16px;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+      #save-btn::before {
+        content: '💾 ';
+        font-size: 16px;
+        line-height: 1;
+      }
+      
+      /* 设置按钮美化 */
+      #save-settings-btn {
+        background: linear-gradient(135deg, #4f46e5, #7c3aed);
+        border: none;
+        color: #ffffff;
+        font-weight: 600;
+        padding: 10px 16px;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+      #save-settings-btn::before {
+        content: '✅ ';
+        font-size: 16px;
+        line-height: 1;
+      }
+      
+      /* 设置视图标签图标 */
+      #settings-language-label::before {
+        content: '🌐';
+        font-size: 13px;
+      }
+      #settings-github-token-label::before {
+        content: '🔑';
+        font-size: 13px;
+      }
+      #settings-github-owner-label::before {
+        content: '👤';
+        font-size: 13px;
+      }
+      #settings-github-repo-label::before {
+        content: '📦';
+        font-size: 13px;
+      }
+      #settings-github-branch-label::before {
+        content: '🌿';
+        font-size: 13px;
+      }
+      #settings-github-base-path-label::before {
+        content: '📂';
+        font-size: 13px;
+      }
+      #settings-format-label::before {
+        content: '📄';
+        font-size: 13px;
+      }
+      #settings-categories-label::before {
+        content: '📋';
+        font-size: 13px;
       }
     </style>
   </head>
@@ -230,20 +444,29 @@
             </div>
           </div>
           <div class="header-actions">
-            <button id="options-btn" class="icon-button" title="Settings">⚙</button>
+            <button id="options-btn" class="icon-button" title="Settings">⚙️</button>
           </div>
         </div>
 
         <!-- 保存视图 -->
         <div id="save-view" class="view active">
-        <label for="source-url" id="source-url-label"></label>
-        <textarea id="source-url" class="textarea-small" placeholder=""></textarea>
-        <label for="selection" id="selection-label"></label>
-        <textarea id="selection" placeholder=""></textarea>
-        <label for="notes" id="notes-label"></label>
-        <textarea id="notes" class="textarea-small" placeholder=""></textarea>
+        <label for="content" id="content-label"></label>
+        <textarea id="content" placeholder=""></textarea>
         <label for="category" id="category-label"></label>
         <select id="category"></select>
+        <label for="source-url" id="source-url-label"></label>
+        <textarea id="source-url" class="textarea-small" placeholder=""></textarea>
+        <label for="image" id="image-label"></label>
+        <div id="image-container" style="margin-bottom: 8px;">
+          <input type="file" id="image-input" accept="image/*" style="display: none;" />
+          <button type="button" id="image-select-btn"></button>
+          <div id="image-preview-container" style="display: none;">
+            <img id="image-preview" />
+            <button type="button" id="image-remove-btn"></button>
+          </div>
+        </div>
+        <label for="notes" id="notes-label"></label>
+        <textarea id="notes" class="textarea-small" placeholder=""></textarea>
           <button id="save-btn"></button>
           <div class="status" id="status" aria-live="polite"></div>
         </div>
@@ -280,9 +503,9 @@
           <div class="settings-section">
             <label for="settings-format" id="settings-format-label"></label>
             <select id="settings-format">
-              <option value="md">Markdown (.md)</option>
-              <option value="json">JSON (.json)</option>
-              <option value="csv">CSV (.csv)</option>
+              <option value="json+md">JSON + Markdown</option>
+              <option value="json">JSON only</option>
+              <option value="md">Markdown only</option>
             </select>
           </div>
           <div class="settings-section">

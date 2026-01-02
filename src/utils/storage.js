@@ -1,7 +1,7 @@
 import browser from 'webextension-polyfill';
 import { DEFAULT_LANGUAGE } from '../i18n/index.js';
 
-export const DEFAULT_CATEGORIES = ['专业知识', '提示词'];
+export const DEFAULT_CATEGORIES = ['Insight', 'Prompt'];
 const DEFAULT_GITHUB = {
   token: '',
   owner: '',
@@ -31,7 +31,7 @@ export async function getSettings() {
       ...(settings.github ?? {}),
       ...(local.github ?? {}),
     },
-    outputFormat: settings.outputFormat || 'md',
+    outputFormats: settings.outputFormats || 'json+md',
   };
 }
 
@@ -48,7 +48,7 @@ export async function saveSettings(partial) {
   const syncPart = {
     language: next.language,
     categories: next.categories,
-    outputFormat: next.outputFormat || 'md',
+    outputFormats: next.outputFormats || 'json+md',
     github: {
       owner: next.github.owner,
       repo: next.github.repo,
