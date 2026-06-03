@@ -14,6 +14,11 @@ const imageSelectBtn = document.getElementById('image-select-btn');
 const imagePreviewContainer = document.getElementById('image-preview-container');
 const imagePreview = document.getElementById('image-preview');
 const imageRemoveBtn = document.getElementById('image-remove-btn');
+const imageGroupPanel = document.getElementById('image-group-panel');
+const imageGroupHint = document.getElementById('image-group-hint');
+const imageGroupGrid = document.getElementById('image-group-grid');
+const imageGroupSelectAllBtn = document.getElementById('image-group-select-all');
+const imageGroupSelectCurrentBtn = document.getElementById('image-group-select-current');
 
 // 视图元素
 const saveView = document.getElementById('save-view');
@@ -39,6 +44,8 @@ let statusState = { key: 'statusIdle', tone: 'muted' };
 let settingsStatusState = { key: '', tone: 'info' };
 let currentImageFile = null; // 存储图片文件对象或URL
 let currentImageUrl = null; // 存储图片URL（用于预览）
+/** @type {{ images: Array<{url: string, base64?: string, type?: string}>, clickedIndex: number, selected: Set<number> } | null} */
+let imageGroupState = null;
 
 init();
 
@@ -48,10 +55,7 @@ async function init() {
   applyTranslations();
   populateCategories(settings.categories);
   
-  // 初始化图片状态
-  currentImageFile = null;
-  currentImageUrl = null;
-  imagePreviewContainer.style.display = 'none';
+  clearImageState();
   
   await Promise.all([loadSelectionFromPage(), loadSourceUrl()]);
   loadSettingsForm(settings);
@@ -62,6 +66,8 @@ async function init() {
   imageSelectBtn.addEventListener('click', () => imageInput.click());
   imageInput.addEventListener('change', handleImageSelect);
   imageRemoveBtn.addEventListener('click', handleImageRemove);
+  imageGroupSelectAllBtn.addEventListener('click', handleImageGroupSelectAll);
+  imageGroupSelectCurrentBtn.addEventListener('click', handleImageGroupSelectCurrentOnly);
   settingsLanguageEl.addEventListener('change', async () => {
     currentLanguage = settingsLanguageEl.value;
     await saveSettings({ language: currentLanguage });
@@ -108,6 +114,11 @@ function applyTranslations() {
   );
   imageSelectBtn.textContent = t(currentLanguage, 'selectImageButton');
   imageRemoveBtn.textContent = t(currentLanguage, 'removeImageButton');
+  imageGroupSelectAllBtn.textContent = t(currentLanguage, 'imageGroupSelectAll');
+  imageGroupSelectCurrentBtn.textContent = t(currentLanguage, 'imageGroupSelectCurrentOnly');
+  if (imageGroupState) {
+    updateImageGroupHint();
+  }
   document.getElementById('notes-label').textContent = t(
     currentLanguage,
     'notesLabel',
@@ -177,57 +188,79 @@ function populateCategories(categories) {
   });
 }
 
+function tFmt(key, vars) {
+  let text = t(currentLanguage, key);
+  Object.entries(vars).forEach(([k, v]) => {
+    text = text.replace(`{${k}}`, String(v));
+  });
+  return text;
+}
+
+function clearImageState() {
+  if (currentImageUrl && currentImageUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(currentImageUrl);
+  }
+  currentImageFile = null;
+  currentImageUrl = null;
+  imageGroupState = null;
+  imagePreviewContainer.style.display = 'none';
+  imageGroupPanel.style.display = 'none';
+  imageGroupGrid.innerHTML = '';
+  imageInput.value = '';
+}
+
 async function loadSelectionFromPage() {
   const pending = await browser.storage.local.get([
     'pendingSelection',
     'pendingUrl',
     'pendingImageUrl',
     'pendingImageData',
+    'pendingImageGroup',
   ]);
   
   // 处理图片右键
   if (pending.pendingImageUrl) {
-    // 优先使用 base64 数据（如果有），因为预览更可靠
-    if (pending.pendingImageData?.base64) {
+    const group = pending.pendingImageGroup;
+    const clickedIndex = group?.clickedIndex ?? 0;
+    const groupImages = group?.images?.length > 1 ? group.images : null;
+
+    if (groupImages) {
+      const images = groupImages.map((item, index) => {
+        const entry = { url: item.url, index };
+        if (index === clickedIndex && pending.pendingImageData?.base64) {
+          entry.base64 = pending.pendingImageData.base64;
+          entry.type = pending.pendingImageData.type || 'image/png';
+        }
+        return entry;
+      });
+      imageGroupState = {
+        images,
+        clickedIndex,
+        selected: new Set([clickedIndex]),
+      };
+      renderImageGroup();
+      syncCurrentImageFromGroup();
+    } else if (pending.pendingImageData?.base64) {
       const base64Data = pending.pendingImageData.base64;
       const mimeType = pending.pendingImageData.type || 'image/png';
       currentImageUrl = `data:${mimeType};base64,${base64Data}`;
-      
-      // 存储图片数据对象，包含base64和类型信息
-      currentImageFile = {
-        base64: base64Data,
-        type: mimeType,
-      };
+      currentImageFile = { base64: base64Data, type: mimeType };
+      showSingleImagePreview(currentImageUrl);
     } else {
-      // 如果没有 base64，使用 URL（但预览可能因 CORS 失败）
       currentImageUrl = pending.pendingImageUrl;
       currentImageFile = pending.pendingImageUrl;
-      
-      // 添加预览错误处理
-      // 即使预览失败，保存仍然可以工作（background 的 fetch 不受 CORS 限制）
-      let previewErrorHandled = false;
-      imagePreview.onerror = () => {
-        if (!previewErrorHandled) {
-          previewErrorHandled = true;
-          console.log('Image preview failed (CORS), but save will work via background fetch');
-          // 可以显示一个提示，但为了不干扰用户体验，我们静默处理
-          // 因为保存功能仍然可以正常工作
-        }
-      };
-      
-      // 重置 onload，确保每次都能正确处理
-      imagePreview.onload = () => {
-        // 预览成功，清除可能的错误状态
-      };
+      showSingleImagePreview(currentImageUrl);
     }
-    
-    imagePreview.src = currentImageUrl;
-    imagePreviewContainer.style.display = 'block';
     
     if (pending.pendingUrl) {
       sourceUrlEl.value = pending.pendingUrl;
     }
-    await browser.storage.local.remove(['pendingImageUrl', 'pendingUrl', 'pendingImageData']);
+    await browser.storage.local.remove([
+      'pendingImageUrl',
+      'pendingUrl',
+      'pendingImageData',
+      'pendingImageGroup',
+    ]);
     return;
   }
   
@@ -268,9 +301,176 @@ async function loadSelectionFromPage() {
   }
 }
 
+function showSingleImagePreview(src) {
+  imageGroupPanel.style.display = 'none';
+  imageGroupState = null;
+  let previewErrorHandled = false;
+  imagePreview.onerror = () => {
+    if (!previewErrorHandled) {
+      previewErrorHandled = true;
+      console.log('Image preview failed (CORS), but save will work via background fetch');
+    }
+  };
+  imagePreview.onload = () => {};
+  imagePreview.src = src;
+  imagePreviewContainer.style.display = 'block';
+}
+
+function renderImageGroup() {
+  if (!imageGroupState) return;
+  imagePreviewContainer.style.display = 'none';
+  imageGroupPanel.style.display = 'block';
+  imageGroupGrid.innerHTML = '';
+
+  imageGroupState.images.forEach((item, index) => {
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'image-group-item';
+    cell.dataset.index = String(index);
+    if (imageGroupState.selected.has(index)) {
+      cell.classList.add('selected');
+    }
+    if (index === imageGroupState.clickedIndex) {
+      cell.classList.add('primary');
+    }
+
+    const img = document.createElement('img');
+    img.alt = '';
+    if (item.base64) {
+      img.src = `data:${item.type || 'image/png'};base64,${item.base64}`;
+    } else {
+      img.src = item.url;
+    }
+
+    const check = document.createElement('span');
+    check.className = 'image-group-check';
+    check.textContent = '✓';
+
+    const tag = document.createElement('span');
+    tag.className = 'image-group-primary-tag';
+    tag.textContent = t(currentLanguage, 'imageGroupPrimaryBadge');
+
+    cell.append(img, check, tag);
+    cell.addEventListener('click', () => toggleImageGroupSelection(index));
+    imageGroupGrid.appendChild(cell);
+  });
+
+  updateImageGroupHint();
+}
+
+function updateImageGroupHint() {
+  if (!imageGroupState) return;
+  imageGroupHint.textContent = tFmt('imageGroupHint', {
+    total: imageGroupState.images.length,
+    selected: imageGroupState.selected.size,
+  });
+}
+
+function toggleImageGroupSelection(index) {
+  if (!imageGroupState) return;
+  if (imageGroupState.selected.has(index)) {
+    if (imageGroupState.selected.size <= 1) {
+      return;
+    }
+    imageGroupState.selected.delete(index);
+  } else {
+    imageGroupState.selected.add(index);
+  }
+  renderImageGroup();
+  syncCurrentImageFromGroup();
+}
+
+function handleImageGroupSelectAll() {
+  if (!imageGroupState) return;
+  imageGroupState.selected = new Set(
+    imageGroupState.images.map((_, index) => index),
+  );
+  renderImageGroup();
+  syncCurrentImageFromGroup();
+}
+
+function handleImageGroupSelectCurrentOnly() {
+  if (!imageGroupState) return;
+  imageGroupState.selected = new Set([imageGroupState.clickedIndex]);
+  renderImageGroup();
+  syncCurrentImageFromGroup();
+}
+
+function syncCurrentImageFromGroup() {
+  if (!imageGroupState || imageGroupState.selected.size === 0) {
+    currentImageFile = null;
+    currentImageUrl = null;
+    return;
+  }
+  const primaryIndex = imageGroupState.selected.has(imageGroupState.clickedIndex)
+    ? imageGroupState.clickedIndex
+    : [...imageGroupState.selected].sort((a, b) => a - b)[0];
+  const item = imageGroupState.images[primaryIndex];
+  if (item.base64) {
+    currentImageFile = { base64: item.base64, type: item.type || 'image/png' };
+    currentImageUrl = `data:${item.type || 'image/png'};base64,${item.base64}`;
+  } else {
+    currentImageFile = item.url;
+    currentImageUrl = item.url;
+  }
+}
+
+function buildImagePayloadFromItem(item) {
+  if (item.base64) {
+    const binaryString = atob(item.base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return {
+      arrayBuffer: Array.from(new Uint8Array(bytes.buffer)),
+      type: item.type || 'image/png',
+    };
+  }
+  return { url: item.url };
+}
+
+function getImagesPayloadForSave() {
+  if (!imageGroupState) {
+    if (!currentImageFile) return { images: [], primaryIndex: 0 };
+    if (typeof currentImageFile === 'string') {
+      return { images: [{ url: currentImageFile }], primaryIndex: 0 };
+    }
+    if (currentImageFile.base64) {
+      return {
+        images: [buildImagePayloadFromItem(currentImageFile)],
+        primaryIndex: 0,
+      };
+    }
+    if (currentImageFile.arrayBuffer) {
+      const arr = Array.isArray(currentImageFile.arrayBuffer)
+        ? currentImageFile.arrayBuffer
+        : Array.from(new Uint8Array(currentImageFile.arrayBuffer));
+      return {
+        images: [{ arrayBuffer: arr, type: currentImageFile.type || 'image/png' }],
+        primaryIndex: 0,
+      };
+    }
+    return { images: [], primaryIndex: 0 };
+  }
+
+  const selectedIndices = [...imageGroupState.selected].sort((a, b) => a - b);
+  const images = selectedIndices.map((index) =>
+    buildImagePayloadFromItem(imageGroupState.images[index]),
+  );
+  const primaryIndex = selectedIndices.indexOf(imageGroupState.clickedIndex);
+  return {
+    images,
+    primaryIndex: primaryIndex >= 0 ? primaryIndex : 0,
+  };
+}
+
 function handleImageSelect(event) {
   const file = event.target.files[0];
   if (!file) return;
+  
+  imageGroupState = null;
+  imageGroupPanel.style.display = 'none';
   
   if (!file.type.startsWith('image/')) {
     setStatus('invalidImage', 'error');
@@ -347,14 +547,7 @@ function handleImageSelect(event) {
 }
 
 function handleImageRemove() {
-  // 如果currentImageUrl是blob URL，需要释放
-  if (currentImageUrl && currentImageUrl.startsWith('blob:')) {
-    URL.revokeObjectURL(currentImageUrl);
-  }
-  currentImageFile = null;
-  currentImageUrl = null;
-  imagePreviewContainer.style.display = 'none';
-  imageInput.value = '';
+  clearImageState();
 }
 
 // 将图片URL转换为PNG格式的ArrayBuffer（带超时和CORS错误检测）
@@ -416,9 +609,15 @@ async function handleSave() {
   const url = sourceUrlEl.value.trim();
   const notes = notesEl.value.trim();
   
-  // 至少需要content或image之一
-  if (!content && !currentImageFile) {
+  const { images: imagesPayload, primaryIndex } = getImagesPayloadForSave();
+  const hasImages = imagesPayload.length > 0;
+
+  if (!content && !hasImages) {
     setStatus('emptyContent', 'error');
+    return;
+  }
+  if (imageGroupState && imageGroupState.selected.size === 0) {
+    setStatus('noImageSelected', 'error');
     return;
   }
   
@@ -427,77 +626,18 @@ async function handleSave() {
   setStatus('statusSaving', 'progress');
   
   try {
-    // 准备图片数据
     let imageData = null;
-    if (currentImageFile) {
-      if (typeof currentImageFile === 'string') {
-        // 如果是URL字符串，直接传给background下载（更快，避免在popup中转换）
-        // background script 的 fetch 不受 Canvas CORS 限制，可以直接下载
-        console.log('Using URL for direct download (faster):', currentImageFile);
-        imageData = { url: currentImageFile };
-      } else if (currentImageFile.base64) {
-        // 如果是从页面获取的base64数据，直接使用
-        try {
-          // 将base64转换为ArrayBuffer
-          const binaryString = atob(currentImageFile.base64);
-          const bytes = new Uint8Array(binaryString.length);
-          for (let i = 0; i < binaryString.length; i++) {
-            bytes[i] = binaryString.charCodeAt(i);
-          }
-          // ArrayBuffer不能直接通过消息传递，需要转换为数组
-          const uint8Array = new Uint8Array(bytes.buffer);
-          imageData = {
-            arrayBuffer: Array.from(uint8Array), // 转换为普通数组以便序列化
-            type: currentImageFile.type || 'image/png',
-          };
-        } catch (error) {
-          console.error('Failed to process base64 image data:', error);
-          // 如果base64处理失败，尝试使用URL（如果有）
-          if (currentImageUrl && currentImageUrl.startsWith('http')) {
-            imageData = { url: currentImageUrl };
-          } else {
-            throw new Error('Failed to process image data');
-          }
-        }
-      } else if (currentImageFile.arrayBuffer) {
-        // 如果已经有ArrayBuffer（可能是数组格式）
-        // 确保是数组格式以便序列化
-        const arr = Array.isArray(currentImageFile.arrayBuffer) 
-          ? currentImageFile.arrayBuffer 
-          : Array.from(new Uint8Array(currentImageFile.arrayBuffer));
-        imageData = {
-          arrayBuffer: arr,
-          type: currentImageFile.type || 'image/png',
-        };
-      } else if (currentImageFile instanceof File || (currentImageFile.constructor && currentImageFile.constructor.name === 'File')) {
-        // 如果是File对象，应该已经是PNG格式了（在handleImageSelect中已转换）
-        try {
-          const arrayBuffer = await currentImageFile.arrayBuffer();
-          // 调试：检查ArrayBuffer大小
-          console.log('File ArrayBuffer size:', arrayBuffer.byteLength, 'File size:', currentImageFile.size);
-          if (arrayBuffer.byteLength === 0) {
-            throw new Error('File ArrayBuffer is empty');
-          }
-          // ArrayBuffer不能直接通过消息传递，需要转换为数组
-          const uint8Array = new Uint8Array(arrayBuffer);
-          const arrayData = Array.from(uint8Array);
-          console.log('Converted array length:', arrayData.length);
-          if (arrayData.length === 0) {
-            throw new Error('Converted array is empty');
-          }
-          imageData = {
-            arrayBuffer: arrayData, // 转换为普通数组以便序列化
-            type: 'image/png', // 统一为PNG
-          };
-        } catch (error) {
-          console.error('Failed to read File object:', error);
-          throw new Error('Failed to read image file');
-        }
-      } else {
-        // 未知的图片文件类型
-        console.error('Unknown image file type:', typeof currentImageFile, currentImageFile);
-        throw new Error('Invalid image file format');
+    if (hasImages) {
+      imageData = imagesPayload[primaryIndex] ?? imagesPayload[0];
+    } else if (currentImageFile instanceof File || (currentImageFile?.constructor?.name === 'File')) {
+      const arrayBuffer = await currentImageFile.arrayBuffer();
+      if (arrayBuffer.byteLength === 0) {
+        throw new Error('File ArrayBuffer is empty');
       }
+      imageData = {
+        arrayBuffer: Array.from(new Uint8Array(arrayBuffer)),
+        type: 'image/png',
+      };
     }
     
     await browser.runtime.sendMessage({
@@ -508,6 +648,8 @@ async function handleSave() {
         url,
         notes,
         image: imageData,
+        images: hasImages ? imagesPayload : undefined,
+        primaryIndex,
       },
     });
     

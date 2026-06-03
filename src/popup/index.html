@@ -246,6 +246,102 @@
         object-fit: contain;
         background: #f9fafb;
       }
+      #image-group-panel {
+        display: none;
+        margin-bottom: 8px;
+      }
+      #image-group-hint {
+        font-size: 11px;
+        color: #64748b;
+        margin: 0 0 6px;
+      }
+      #image-group-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .image-group-item {
+        position: relative;
+        aspect-ratio: 1;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 2px solid #e5e7eb;
+        cursor: pointer;
+        background: #f9fafb;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+      .image-group-item.selected {
+        border-color: #4f46e5;
+        box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25);
+      }
+      .image-group-item.primary {
+        border-color: #0ea5e9;
+      }
+      .image-group-item img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .image-group-item .image-group-check {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid #cbd5e1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        color: transparent;
+        line-height: 1;
+      }
+      .image-group-item.selected .image-group-check {
+        background: #4f46e5;
+        border-color: #4f46e5;
+        color: #fff;
+      }
+      .image-group-item .image-group-primary-tag {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        font-size: 9px;
+        text-align: center;
+        padding: 2px 0;
+        background: rgba(14, 165, 233, 0.85);
+        color: #fff;
+        display: none;
+      }
+      .image-group-item.primary .image-group-primary-tag {
+        display: block;
+      }
+      #image-group-actions {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      #image-group-actions button {
+        flex: 1;
+        margin-top: 0;
+        padding: 6px 8px;
+        font-size: 11px;
+        font-weight: 500;
+        border-radius: 8px;
+        background: #f8fafc;
+        color: #475569;
+        border: 1px solid #e2e8f0;
+        box-shadow: none;
+      }
+      #image-group-actions button:hover:not(:disabled) {
+        background: #f1f5f9;
+        transform: none;
+        box-shadow: none;
+      }
       
       /* 图片选择按钮美化 */
       #image-select-btn {
@@ -460,6 +556,14 @@
         <div id="image-container" style="margin-bottom: 8px;">
           <input type="file" id="image-input" accept="image/*" style="display: none;" />
           <button type="button" id="image-select-btn"></button>
+          <div id="image-group-panel">
+            <p id="image-group-hint"></p>
+            <div id="image-group-grid"></div>
+            <div id="image-group-actions">
+              <button type="button" id="image-group-select-all"></button>
+              <button type="button" id="image-group-select-current"></button>
+            </div>
+          </div>
           <div id="image-preview-container" style="display: none;">
             <img id="image-preview" />
             <button type="button" id="image-remove-btn"></button>
