@@ -1,28 +1,29 @@
 name: Release
 
 on:
-  # 只有推送 v* 形式的 tag 时自动触发
   push:
     tags:
       - 'v*'
-  # 仍然保留手动触发（例如需要重跑一次）
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-and-release:
-    # 双保险：仅在 v* tag 时跑
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     env:
       NODE_VERSION: '22'
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -33,8 +34,8 @@ jobs:
       - name: Capture version from tag
         id: version
         run: |
-          RAW="${GITHUB_REF_NAME}"   # e.g. v0.1.3
-          STRIPPED="${RAW#v}"        # -> 0.1.3
+          RAW="${GITHUB_REF_NAME}"
+          STRIPPED="${RAW#v}"
           echo "value=${STRIPPED}" >> "$GITHUB_OUTPUT"
 
       - name: Sync package.json version with tag
@@ -56,13 +57,13 @@ jobs:
           zip -r "../../InfoFlow-Extractor-firefox-${{ steps.version.outputs.value }}.zip" .
 
       - name: Upload Chrome artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: chrome-${{ steps.version.outputs.value }}
           path: InfoFlow-Extractor-chrome-${{ steps.version.outputs.value }}.zip
 
       - name: Upload Firefox artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: firefox-${{ steps.version.outputs.value }}
           path: InfoFlow-Extractor-firefox-${{ steps.version.outputs.value }}.zip
@@ -70,8 +71,9 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }} # 直接使用已有的 v* tag
+          tag_name: ${{ github.ref_name }}
           name: InfoFlow Picker ${{ github.ref_name }}
+          generate_release_notes: true
           files: |
             InfoFlow-Extractor-chrome-${{ steps.version.outputs.value }}.zip
             InfoFlow-Extractor-firefox-${{ steps.version.outputs.value }}.zip
