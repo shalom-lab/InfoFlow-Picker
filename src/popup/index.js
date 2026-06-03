@@ -295,8 +295,7 @@ async function loadSelectionFromPage() {
       type: 'GET_SELECTION',
     });
     contentEl.value = response?.text ?? '';
-  } catch (error) {
-    // 某些页面不注入 content script 时忽略错误，保留手动输入
+  } catch {
     contentEl.value = '';
   }
 }
@@ -550,47 +549,6 @@ function handleImageRemove() {
   clearImageState();
 }
 
-// 将图片URL转换为PNG格式的ArrayBuffer（带超时和CORS错误检测）
-// 注意：此函数现在主要用于兼容性，实际应该直接使用URL让background下载
-async function convertImageUrlToPng(imageUrl) {
-  return new Promise((resolve, reject) => {
-    // 添加超时机制（8秒）
-    const timeout = setTimeout(() => {
-      const error = new Error('Image conversion timeout');
-      error.isTimeout = true;
-      reject(error);
-    }, 8000);
-    
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      clearTimeout(timeout);
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          const error = new Error('Failed to convert image to PNG (CORS issue)');
-          error.isCorsError = true;
-          reject(error);
-          return;
-        }
-        blob.arrayBuffer().then(resolve).catch(reject);
-      }, 'image/png');
-    };
-    img.onerror = () => {
-      clearTimeout(timeout);
-      const error = new Error('Failed to load image (CORS or network issue)');
-      error.isCorsError = true;
-      reject(error);
-    };
-    img.src = imageUrl;
-  });
-}
-
 async function loadSourceUrl() {
   const [tab] = await browser.tabs.query({
     active: true,
@@ -663,9 +621,7 @@ async function handleSave() {
     }, 1500);
   } catch (error) {
     console.error('Save error:', error);
-    // 显示更详细的错误信息
-    if (error?.message?.includes('GitHub')) {
-      console.error('GitHub configuration issue:', error.message);
+    if (error?.message?.includes('GitHub') || error?.message?.includes('Missing GitHub')) {
       setStatus('missingGithub', 'error');
     } else {
       setStatus('statusError', 'error');
@@ -716,14 +672,12 @@ async function handleSaveSettings() {
       },
     });
     setSettingsStatus('settingsSaved', 'success');
-    
-    // 更新当前语言和分类
+
     currentLanguage = settingsLanguageEl.value;
     applyTranslations();
     const updatedSettings = await getSettings();
     populateCategories(updatedSettings.categories);
-  } catch (error) {
-    console.error(error);
+  } catch {
     setSettingsStatus('settingsError', 'error');
   }
 }

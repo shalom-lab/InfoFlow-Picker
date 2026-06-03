@@ -92,8 +92,7 @@ async function handleSave() {
       },
     });
     setStatus('settingsSaved');
-  } catch (error) {
-    console.error(error);
+  } catch {
     setStatus('settingsError');
   }
 }

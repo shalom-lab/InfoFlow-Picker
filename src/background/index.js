@@ -34,26 +34,22 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
     };
 
     if (tab?.id) {
-      try {
-        const [imageData, imageGroup] = await Promise.all([
-          browser.tabs.sendMessage(tab.id, {
-            type: 'GET_IMAGE_DATA',
-            imageUrl: info.srcUrl,
-          }).catch(() => null),
-          browser.tabs.sendMessage(tab.id, {
-            type: 'GET_IMAGE_GROUP',
-            imageUrl: info.srcUrl,
-          }).catch(() => null),
-        ]);
+      const [imageData, imageGroup] = await Promise.all([
+        browser.tabs.sendMessage(tab.id, {
+          type: 'GET_IMAGE_DATA',
+          imageUrl: info.srcUrl,
+        }).catch(() => null),
+        browser.tabs.sendMessage(tab.id, {
+          type: 'GET_IMAGE_GROUP',
+          imageUrl: info.srcUrl,
+        }).catch(() => null),
+      ]);
 
-        if (imageData?.base64) {
-          pending.pendingImageData = imageData;
-        }
-        if (imageGroup?.images?.length) {
-          pending.pendingImageGroup = imageGroup;
-        }
-      } catch (error) {
-        console.log('Failed to get image data from page, using URL fallback:', error);
+      if (imageData?.base64) {
+        pending.pendingImageData = imageData;
+      }
+      if (imageGroup?.images?.length) {
+        pending.pendingImageGroup = imageGroup;
       }
     }
 
