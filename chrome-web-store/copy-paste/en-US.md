@@ -83,7 +83,7 @@ Adds the “InfoFlow Picker” item when the user selects text or right-clicks a
 
 ### scripting justification
 
-Used with content scripts to read selection and image data from the active page when the user invokes the extension (Manifest V3). No injection on pages without user action.
+Injects a bundled content script into the **active tab only** when the user clicks the extension icon or the context menu (Manifest V3 `scripting.executeScript`). Used to read selection and image data for that one action. No `<all_urls>` host permission and no background injection on other sites.
 
 ### storage justification
 
@@ -97,7 +97,7 @@ Reads the active tab URL as the source link and messages the content script on t
 
 HTTPS requests to GitHub REST API only, to upload user-approved content and images to the user’s repository. User-captured data is not sent to developer servers.
 
-Content scripts may run on pages the user visits to read selection/images; captured data goes only to the user’s GitHub.
+Page access is limited to the tab the user activated (icon or context menu). Captured data goes only to the user’s GitHub.
 
 ### Remote code
 

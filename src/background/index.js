@@ -1,6 +1,7 @@
 import browser from 'webextension-polyfill';
 import { getSettings } from '../utils/storage.js';
 import { PENDING_CAPTURE_KEY } from '../utils/draft.js';
+import { sendToContentScript } from '../utils/injectContent.js';
 
 const CONTEXT_MENU_ID = 'infoflow-extract';
 
@@ -37,11 +38,11 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
 
     if (tab?.id) {
       const [imageData, imageGroup] = await Promise.all([
-        browser.tabs.sendMessage(tab.id, {
+        sendToContentScript(tab.id, {
           type: 'GET_IMAGE_DATA',
           imageUrl: info.srcUrl,
         }).catch(() => null),
-        browser.tabs.sendMessage(tab.id, {
+        sendToContentScript(tab.id, {
           type: 'GET_IMAGE_GROUP',
           imageUrl: info.srcUrl,
         }).catch(() => null),

@@ -1,18 +1,25 @@
 import browser from 'webextension-polyfill';
 import { getImageGroup } from './imageGroup.js';
 
-browser.runtime.onMessage.addListener(async (message) => {
-  if (message?.type === 'GET_SELECTION') {
-    return { text: getSelectedText() };
-  }
-  if (message?.type === 'GET_IMAGE_GROUP' && message?.imageUrl) {
-    return getImageGroup(message.imageUrl);
-  }
-  if (message?.type === 'GET_IMAGE_DATA' && message?.imageUrl) {
-    return await getImageData(message.imageUrl);
-  }
-  return undefined;
-});
+if (!globalThis.__infoflowPickerContentInit) {
+  globalThis.__infoflowPickerContentInit = true;
+
+  browser.runtime.onMessage.addListener(async (message) => {
+    if (message?.type === 'PING') {
+      return { ok: true };
+    }
+    if (message?.type === 'GET_SELECTION') {
+      return { text: getSelectedText() };
+    }
+    if (message?.type === 'GET_IMAGE_GROUP' && message?.imageUrl) {
+      return getImageGroup(message.imageUrl);
+    }
+    if (message?.type === 'GET_IMAGE_DATA' && message?.imageUrl) {
+      return await getImageData(message.imageUrl);
+    }
+    return undefined;
+  });
+}
 
 function getSelectedText() {
   const selection = window.getSelection();

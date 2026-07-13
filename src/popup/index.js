@@ -10,6 +10,7 @@ import {
   clearPendingCapture,
 } from '../utils/draft.js';
 import { t } from '../i18n/index.js';
+import { sendToContentScript } from '../utils/injectContent.js';
 
 const contentEl = document.getElementById('content');
 const sourceUrlEl = document.getElementById('source-url');
@@ -426,7 +427,7 @@ async function tryLoadSelectionFromActiveTab() {
   }
 
   try {
-    const response = await browser.tabs.sendMessage(tab.id, {
+    const response = await sendToContentScript(tab.id, {
       type: 'GET_SELECTION',
     });
     contentEl.value = response?.text ?? '';
