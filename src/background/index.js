@@ -1,5 +1,6 @@
 import browser from 'webextension-polyfill';
 import { getSettings } from '../utils/storage.js';
+import { PENDING_CAPTURE_KEY } from '../utils/draft.js';
 
 const CONTEXT_MENU_ID = 'infoflow-extract';
 
@@ -26,11 +27,12 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
   
   // 处理图片右键
   if (info.mediaType === 'image' && info.srcUrl) {
-    const pending = {
-      pendingImageUrl: info.srcUrl,
-      pendingUrl: tab.url ?? '',
-      pendingImageData: null,
-      pendingImageGroup: null,
+    const pendingCapture = {
+      url: tab.url ?? '',
+      imageUrl: info.srcUrl,
+      imageData: null,
+      imageGroup: null,
+      capturedAt: Date.now(),
     };
 
     if (tab?.id) {
@@ -46,14 +48,14 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
       ]);
 
       if (imageData?.base64) {
-        pending.pendingImageData = imageData;
+        pendingCapture.imageData = imageData;
       }
       if (imageGroup?.images?.length) {
-        pending.pendingImageGroup = imageGroup;
+        pendingCapture.imageGroup = imageGroup;
       }
     }
 
-    await browser.storage.local.set(pending);
+    await browser.storage.local.set({ [PENDING_CAPTURE_KEY]: pendingCapture });
     await browser.action.openPopup?.().catch(() => {});
     return;
   }
@@ -62,8 +64,11 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
   const selection = info.selectionText?.trim();
   if (!selection || !tab?.id) return;
   await browser.storage.local.set({
-    pendingSelection: selection,
-    pendingUrl: tab.url ?? '',
+    [PENDING_CAPTURE_KEY]: {
+      content: selection,
+      url: tab.url ?? '',
+      capturedAt: Date.now(),
+    },
   });
   await browser.action.openPopup?.().catch(() => {});
 });

@@ -1,5 +1,14 @@
 import browser from 'webextension-polyfill';
 import { getSettings, saveSettings, DEFAULT_CATEGORIES } from '../utils/storage.js';
+import {
+  clearSaveDraft,
+  emptyDraft,
+  getPendingCapture,
+  getSaveDraft,
+  mergePendingIntoDraft,
+  setSaveDraft,
+  clearPendingCapture,
+} from '../utils/draft.js';
 import { t } from '../i18n/index.js';
 
 const contentEl = document.getElementById('content');
@@ -46,6 +55,7 @@ let currentImageFile = null; // 存储图片文件对象或URL
 let currentImageUrl = null; // 存储图片URL（用于预览）
 /** @type {{ images: Array<{url: string, base64?: string, type?: string}>, clickedIndex: number, selected: Set<number> } | null} */
 let imageGroupState = null;
+let persistDraftTimer = null;
 
 init();
 
@@ -57,7 +67,7 @@ async function init() {
   
   clearImageState();
   
-  await Promise.all([loadSelectionFromPage(), loadSourceUrl()]);
+  await Promise.all([loadSavedFormState(), loadSourceUrl()]);
   loadSettingsForm(settings);
   
   optionsBtn.addEventListener('click', toggleView);
@@ -68,6 +78,12 @@ async function init() {
   imageRemoveBtn.addEventListener('click', handleImageRemove);
   imageGroupSelectAllBtn.addEventListener('click', handleImageGroupSelectAll);
   imageGroupSelectCurrentBtn.addEventListener('click', handleImageGroupSelectCurrentOnly);
+  contentEl.addEventListener('input', schedulePersistDraft);
+  notesEl.addEventListener('input', schedulePersistDraft);
+  sourceUrlEl.addEventListener('input', schedulePersistDraft);
+  categoryEl.addEventListener('change', () => {
+    schedulePersistDraft();
+  });
   settingsLanguageEl.addEventListener('change', async () => {
     currentLanguage = settingsLanguageEl.value;
     await saveSettings({ language: currentLanguage });
@@ -209,78 +225,196 @@ function clearImageState() {
   imageInput.value = '';
 }
 
-async function loadSelectionFromPage() {
-  const pending = await browser.storage.local.get([
-    'pendingSelection',
-    'pendingUrl',
-    'pendingImageUrl',
-    'pendingImageData',
-    'pendingImageGroup',
+async function loadSavedFormState() {
+  const [pending, existingDraft] = await Promise.all([
+    getPendingCapture(),
+    getSaveDraft(),
   ]);
-  
-  // 处理图片右键
-  if (pending.pendingImageUrl) {
-    const group = pending.pendingImageGroup;
-    const clickedIndex = group?.clickedIndex ?? 0;
-    const groupImages = group?.images?.length > 1 ? group.images : null;
 
-    if (groupImages) {
-      const images = groupImages.map((item, index) => {
-        const entry = { url: item.url, index };
-        if (index === clickedIndex && pending.pendingImageData?.base64) {
-          entry.base64 = pending.pendingImageData.base64;
-          entry.type = pending.pendingImageData.type || 'image/png';
-        }
-        return entry;
-      });
-      imageGroupState = {
-        images,
-        clickedIndex,
-        selected: new Set([clickedIndex]),
-      };
-      renderImageGroup();
-      syncCurrentImageFromGroup();
-    } else if (pending.pendingImageData?.base64) {
-      const base64Data = pending.pendingImageData.base64;
-      const mimeType = pending.pendingImageData.type || 'image/png';
-      currentImageUrl = `data:${mimeType};base64,${base64Data}`;
-      currentImageFile = { base64: base64Data, type: mimeType };
-      showSingleImagePreview(currentImageUrl);
-    } else {
-      currentImageUrl = pending.pendingImageUrl;
-      currentImageFile = pending.pendingImageUrl;
-      showSingleImagePreview(currentImageUrl);
-    }
-    
-    if (pending.pendingUrl) {
-      sourceUrlEl.value = pending.pendingUrl;
-    }
-    await browser.storage.local.remove([
-      'pendingImageUrl',
-      'pendingUrl',
-      'pendingImageData',
-      'pendingImageGroup',
-    ]);
-    return;
-  }
-  
-  // 处理文本选择
-  if (pending.pendingSelection) {
-    contentEl.value = pending.pendingSelection;
-    if (pending.pendingUrl) {
-      sourceUrlEl.value = pending.pendingUrl;
-    }
-    await browser.storage.local.remove(['pendingSelection', 'pendingUrl']);
+  let draft = existingDraft ?? emptyDraft();
+
+  if (pending) {
+    draft = mergePendingIntoDraft(
+      {
+        content: pending.content,
+        url: pending.url,
+        imageUrl: pending.imageUrl,
+        imageData: pending.imageData,
+        imageGroup: pending.imageGroup,
+      },
+      existingDraft,
+    );
+    await clearPendingCapture();
+    await setSaveDraft(draft);
+    applyDraftToForm(draft);
     return;
   }
 
+  if (existingDraft) {
+    applyDraftToForm(existingDraft);
+    return;
+  }
+
+  await tryLoadSelectionFromActiveTab();
+  const captured = collectDraftFromForm();
+  if (captured.content || captured.url) {
+    await setSaveDraft(captured);
+  }
+}
+
+function applyDraftToForm(draft) {
+  contentEl.value = draft.content ?? '';
+  notesEl.value = draft.notes ?? '';
+  sourceUrlEl.value = draft.url ?? '';
+  if (draft.category) {
+    categoryEl.value = draft.category;
+  }
+
+  clearImageState();
+
+  if (!draft.imageUrl && !draft.imageData) {
+    return;
+  }
+
+  const group = draft.imageGroup;
+  const clickedIndex = group?.clickedIndex ?? 0;
+  const groupImages = group?.images?.length > 1 ? group.images : null;
+  const selectedIndices = Array.isArray(draft.imageGroupSelected) && draft.imageGroupSelected.length
+    ? draft.imageGroupSelected
+    : [clickedIndex];
+
+  if (groupImages) {
+    const images = groupImages.map((item, index) => {
+      const entry = { url: item.url, index };
+      if (index === clickedIndex && draft.imageData?.base64) {
+        entry.base64 = draft.imageData.base64;
+        entry.type = draft.imageData.type || 'image/png';
+      }
+      return entry;
+    });
+    imageGroupState = {
+      images,
+      clickedIndex,
+      selected: new Set(selectedIndices),
+    };
+    renderImageGroup();
+    syncCurrentImageFromGroup();
+    return;
+  }
+
+  if (draft.imageData?.base64) {
+    const mimeType = draft.imageData.type || 'image/png';
+    currentImageUrl = `data:${mimeType};base64,${draft.imageData.base64}`;
+    currentImageFile = {
+      base64: draft.imageData.base64,
+      type: mimeType,
+    };
+    showSingleImagePreview(currentImageUrl);
+    return;
+  }
+
+  if (draft.imageUrl) {
+    currentImageUrl = draft.imageUrl;
+    currentImageFile = draft.imageUrl;
+    showSingleImagePreview(currentImageUrl);
+  }
+}
+
+function collectDraftFromForm() {
+  const draft = {
+    content: contentEl.value,
+    notes: notesEl.value,
+    url: sourceUrlEl.value.trim(),
+    category: categoryEl.value,
+    imageUrl: null,
+    imageData: null,
+    imageGroup: null,
+    imageGroupSelected: null,
+  };
+
+  if (imageGroupState) {
+    draft.imageGroup = {
+      clickedIndex: imageGroupState.clickedIndex,
+      images: imageGroupState.images.map(({ url, index }) => ({ url, index })),
+    };
+    draft.imageGroupSelected = [...imageGroupState.selected].sort((a, b) => a - b);
+    const primaryIndex = imageGroupState.selected.has(imageGroupState.clickedIndex)
+      ? imageGroupState.clickedIndex
+      : draft.imageGroupSelected[0];
+    const primary = imageGroupState.images[primaryIndex];
+    if (primary) {
+      draft.imageUrl = primary.url;
+      if (primary.base64) {
+        draft.imageData = {
+          base64: primary.base64,
+          type: primary.type || 'image/png',
+        };
+      }
+    }
+    return draft;
+  }
+
+  if (currentImageFile?.base64) {
+    draft.imageUrl = currentImageUrl?.startsWith('data:') ? '' : (currentImageUrl ?? '');
+    draft.imageData = {
+      base64: currentImageFile.base64,
+      type: currentImageFile.type || 'image/png',
+    };
+    return draft;
+  }
+
+  if (typeof currentImageFile === 'string') {
+    draft.imageUrl = currentImageFile;
+  }
+
+  return draft;
+}
+
+function schedulePersistDraft() {
+  if (persistDraftTimer) {
+    clearTimeout(persistDraftTimer);
+  }
+  persistDraftTimer = setTimeout(async () => {
+    persistDraftTimer = null;
+    const draft = collectDraftFromForm();
+    if (
+      draft.content ||
+      draft.notes ||
+      draft.url ||
+      draft.imageUrl ||
+      draft.imageData ||
+      draft.imageGroup
+    ) {
+      await setSaveDraft(draft);
+    }
+  }, 300);
+}
+
+async function persistDraftNow() {
+  if (persistDraftTimer) {
+    clearTimeout(persistDraftTimer);
+    persistDraftTimer = null;
+  }
+  const draft = collectDraftFromForm();
+  if (
+    draft.content ||
+    draft.notes ||
+    draft.url ||
+    draft.imageUrl ||
+    draft.imageData ||
+    draft.imageGroup
+  ) {
+    await setSaveDraft(draft);
+  }
+}
+
+async function tryLoadSelectionFromActiveTab() {
   const [tab] = await browser.tabs.query({
     active: true,
     currentWindow: true,
   });
   if (!tab?.id || !tab.url) return;
 
-  // 对浏览器内部页面（如 chrome://、edge://、about: 等）不尝试自动读取选区，避免报错
   if (
     tab.url.startsWith('chrome://') ||
     tab.url.startsWith('edge://') ||
@@ -290,6 +424,7 @@ async function loadSelectionFromPage() {
   ) {
     return;
   }
+
   try {
     const response = await browser.tabs.sendMessage(tab.id, {
       type: 'GET_SELECTION',
@@ -377,6 +512,7 @@ function toggleImageGroupSelection(index) {
   }
   renderImageGroup();
   syncCurrentImageFromGroup();
+  schedulePersistDraft();
 }
 
 function handleImageGroupSelectAll() {
@@ -386,6 +522,7 @@ function handleImageGroupSelectAll() {
   );
   renderImageGroup();
   syncCurrentImageFromGroup();
+  schedulePersistDraft();
 }
 
 function handleImageGroupSelectCurrentOnly() {
@@ -393,6 +530,7 @@ function handleImageGroupSelectCurrentOnly() {
   imageGroupState.selected = new Set([imageGroupState.clickedIndex]);
   renderImageGroup();
   syncCurrentImageFromGroup();
+  schedulePersistDraft();
 }
 
 function syncCurrentImageFromGroup() {
@@ -528,6 +666,7 @@ function handleImageSelect(event) {
           imagePreview.onload = null;
           imagePreview.src = currentImageUrl;
           imagePreviewContainer.style.display = 'block';
+          schedulePersistDraft();
         }).catch((error) => {
           console.error('Failed to process blob:', error);
           setStatus('invalidImage', 'error');
@@ -547,9 +686,13 @@ function handleImageSelect(event) {
 
 function handleImageRemove() {
   clearImageState();
+  persistDraftNow();
 }
 
 async function loadSourceUrl() {
+  if (sourceUrlEl.value.trim()) {
+    return;
+  }
   const [tab] = await browser.tabs.query({
     active: true,
     currentWindow: true,
@@ -612,12 +755,13 @@ async function handleSave() {
     });
     
     setStatus('statusSuccess', 'success');
-    
-    // 清空表单
+    await clearSaveDraft();
+
     setTimeout(() => {
       contentEl.value = '';
       notesEl.value = '';
-      handleImageRemove();
+      sourceUrlEl.value = '';
+      clearImageState();
     }, 1500);
   } catch (error) {
     console.error('Save error:', error);
