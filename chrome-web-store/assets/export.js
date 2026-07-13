@@ -109,5 +109,3 @@ function buildToolbar(title, prevHref, nextHref, filename, width = 1280, height 
   );
   initScreenshotExport(filename, width, height);
 }
-
-window.StoreExport = { captureToBlob, downloadBlob, ensureStoreIconsReady };
