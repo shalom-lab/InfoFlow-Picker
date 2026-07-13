@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>02 — Multi-image · InfoFlow Picker</title>
+  <link rel="stylesheet" href="assets/common.css" />
+  <style>
+    .glow-a { width: 280px; height: 280px; background: rgba(99,102,241,0.35); top: 8%; left: 8%; }
+    .glow-b { width: 200px; height: 200px; background: rgba(236,72,153,0.28); bottom: 10%; right: 12%; }
+  </style>
+</head>
+<body>
+  <div id="capture">
+    <div class="frame-inner bg-mesh-dark">
+      <div class="grid-dots"></div>
+      <div class="glow-orb glow-a"></div>
+      <div class="glow-orb glow-b"></div>
+      <div class="brand-mark">
+        <div class="brand-icon"><img data-store-icon alt="" /></div>
+        <div class="brand-text">InfoFlow Picker<span>Save images</span></div>
+      </div>
+      <div class="scene scene-reverse">
+        <div class="hero-copy">
+          <h1 class="gradient">Right-click.<br />Save images.</h1>
+          <p>Save any image to GitHub in one click. We detect all images in the same post — pick one, several, or save the whole grid at once.</p>
+          <div class="chip-row">
+            <span class="chip">🖼️ Image save</span>
+            <span class="chip">Twitter grids</span>
+            <span class="chip">Batch upload</span>
+          </div>
+        </div>
+        <div class="panel-col">
+          <div class="popup-mock">
+            <div class="popup-inner">
+              <h3>InfoFlow Picker</h3>
+              <p class="hint-line">4 in post · 2 selected</p>
+              <div class="img-grid">
+                <div class="img-cell on primary">
+                  <div class="img-ph img-ph-1"></div>
+                  <span class="img-check">✓</span>
+                  <span class="img-tag">Picked</span>
+                </div>
+                <div class="img-cell"><div class="img-ph img-ph-2"></div></div>
+                <div class="img-cell on">
+                  <div class="img-ph img-ph-3"></div>
+                  <span class="img-check">✓</span>
+                </div>
+                <div class="img-cell"><div class="img-ph img-ph-4"></div></div>
+              </div>
+              <div class="mini-actions">
+                <button type="button">Select all</button>
+                <button type="button">Current only</button>
+              </div>
+              <button type="button" class="btn-primary">💾 Save to GitHub</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="../assets/icon-data.js"></script>
+  <script src="../assets/export.js"></script>
+  <script>
+    buildToolbar("02 · Save images", "01-main-save.html", "03-settings.html", "02-image-picker-1280x800.png", 1280, 800, "Screenshots / 屏幕截图");
+  </script>
+</body>
+</html>

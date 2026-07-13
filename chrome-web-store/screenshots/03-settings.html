@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>03 — GitHub Settings · InfoFlow Picker</title>
+  <link rel="stylesheet" href="assets/common.css" />
+  <style>
+    .glow-a { width: 240px; height: 240px; background: rgba(167,139,250,0.28); top: 18%; right: 10%; }
+    .glow-b { width: 200px; height: 200px; background: rgba(52,211,153,0.18); bottom: 12%; left: 10%; }
+  </style>
+</head>
+<body>
+  <div id="capture">
+    <div class="frame-inner bg-mesh-light">
+      <div class="grid-dots"></div>
+      <div class="glow-orb glow-a"></div>
+      <div class="glow-orb glow-b"></div>
+      <div class="brand-mark">
+        <div class="brand-icon"><img data-store-icon alt="" /></div>
+        <div class="brand-text">InfoFlow Picker<span>Your GitHub repo</span></div>
+      </div>
+      <div class="scene">
+        <div class="hero-copy">
+          <div class="trust-badge">🔒 Token stored locally only</div>
+          <h1 class="gradient">Connect your<br />GitHub repo</h1>
+          <p>Configure token, repo, branch &amp; categories. Data goes only to your repository — never through our servers.</p>
+          <ul class="feature-list">
+            <li>
+              <span class="fi">📁</span>
+              <span><strong>Custom categories</strong>Insight, Prompt, and more</span>
+            </li>
+            <li>
+              <span class="fi">📄</span>
+              <span><strong>JSON + Markdown</strong>Works with InfoFlow workflows</span>
+            </li>
+          </ul>
+        </div>
+        <div class="panel-col">
+          <div class="settings-panel">
+            <h3>⚙️ Settings</h3>
+            <label>Language</label>
+            <select><option>English</option></select>
+            <label>GitHub Token</label>
+            <input type="text" value="ghp_••••••••••••••••" readonly />
+            <label>Owner / Repository</label>
+            <input type="text" value="your-name / infoflow-data" readonly />
+            <label>Branch</label>
+            <input type="text" value="main" readonly />
+            <label>Categories (one per line)</label>
+            <textarea readonly>Insight
+Prompt
+Reference</textarea>
+            <button type="button" class="btn-primary">Save settings</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="../assets/icon-data.js"></script>
+  <script src="../assets/export.js"></script>
+  <script>
+    buildToolbar("03 · GitHub settings", "02-image-picker.html", "04-overview.html", "03-settings-1280x800.png", 1280, 800, "Screenshots / 屏幕截图");
+  </script>
+</body>
+</html>

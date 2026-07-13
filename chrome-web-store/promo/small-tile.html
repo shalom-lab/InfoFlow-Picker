@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Small promo tile · InfoFlow Picker</title>
+  <link rel="stylesheet" href="../screenshots/assets/common.css" />
+  <link rel="stylesheet" href="assets/promo.css" />
+</head>
+<body class="size-sm">
+  <div id="capture" data-export-bg="#1e1b4b">
+    <div class="frame-inner bg-promo">
+      <div class="grid-dots"></div>
+      <div class="promo-content">
+        <div class="promo-logo">
+          <img data-store-icon alt="" />
+        </div>
+        <div class="promo-text">
+          <h1>InfoFlow Picker</h1>
+          <p>Save images &amp; highlights to GitHub — right-click to capture, batch-pick from same post.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="../assets/icon-data.js"></script>
+  <script src="../assets/export.js"></script>
+  <script>
+    buildToolbar("Small promo tile", "../index.html", "marquee-tile.html", "promo-small-440x280.png", 440, 280, "Small promo tile / 小型宣传图块");
+  </script>
+</body>
+</html>

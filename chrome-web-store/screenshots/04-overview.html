@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>04 — Overview · InfoFlow Picker</title>
+  <link rel="stylesheet" href="assets/common.css" />
+  <style>
+    .glow-a { width: 280px; height: 280px; background: rgba(129,140,248,0.25); top: -20px; left: 38%; }
+    .glow-b { width: 220px; height: 220px; background: rgba(251,113,133,0.18); bottom: 0; right: 22%; }
+  </style>
+</head>
+<body>
+  <div id="capture">
+    <div class="frame-inner bg-mesh-light">
+      <div class="grid-dots"></div>
+      <div class="glow-orb glow-a"></div>
+      <div class="glow-orb glow-b"></div>
+      <div class="bento-wrap">
+        <div class="bento-hero">
+          <div class="bento-logo"><img data-store-icon alt="" /></div>
+          <h1>InfoFlow Picker</h1>
+          <p>Save images &amp; text to GitHub · Right-click · Batch pick · Categories</p>
+        </div>
+        <div class="bento-grid">
+          <div class="bento-card">
+            <div class="ico">🖼️</div>
+            <h3>Save images</h3>
+            <p>Right-click any image. Batch-save grids from the same post to GitHub.</p>
+          </div>
+          <div class="bento-card">
+            <div class="ico">📝</div>
+            <h3>Text capture</h3>
+            <p>Select text or use the context menu. Auto-fill content &amp; URL.</p>
+          </div>
+          <div class="bento-card">
+            <div class="ico">💾</div>
+            <h3>GitHub sync</h3>
+            <p>JSON + Markdown. Organized by category folders.</p>
+          </div>
+          <div class="bento-card">
+            <div class="ico">📋</div>
+            <h3>Draft cache</h3>
+            <p>Nothing lost until save succeeds. Retry anytime.</p>
+          </div>
+        </div>
+        <div class="flow-bar">
+          <span>Right-click image</span>
+          <span class="arr">→</span>
+          <span>Pick &amp; edit</span>
+          <span class="arr">→</span>
+          <span>Save to GitHub</span>
+          <span class="arr">→</span>
+          <span>InfoFlow</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="../assets/icon-data.js"></script>
+  <script src="../assets/export.js"></script>
+  <script>
+    buildToolbar("04 · Overview", "03-settings.html", "index.html", "04-overview-1280x800.png", 1280, 800, "Screenshots / 屏幕截图");
+  </script>
+</body>
+</html>

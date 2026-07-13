@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Marquee promo tile · InfoFlow Picker</title>
+  <link rel="stylesheet" href="../screenshots/assets/common.css" />
+  <link rel="stylesheet" href="assets/promo.css" />
+  <style>
+    .promo-mock .img-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin: 8px 0; }
+    .promo-mock .img-cell {
+      aspect-ratio: 1; border-radius: 7px; border: 2px solid #e2e8f0;
+      overflow: hidden; position: relative; background: #f1f5f9;
+    }
+    .promo-mock .img-cell.on { border-color: #4f46e5; }
+    .promo-mock .img-check {
+      position: absolute; top: 3px; right: 3px; width: 14px; height: 14px; border-radius: 4px;
+      background: #4f46e5; color: #fff; font-size: 9px;
+      display: flex; align-items: center; justify-content: center; font-weight: 700;
+    }
+    .promo-mock .img-cell:not(.on) .img-check { display: none; }
+    .promo-mock .hint-line { font-size: 10px; color: #64748b; margin-bottom: 6px; text-align: center; }
+  </style>
+</head>
+<body class="size-lg">
+  <div id="capture" data-export-bg="#1e1b4b">
+    <div class="frame-inner bg-promo">
+      <div class="grid-dots"></div>
+      <div class="promo-content">
+        <div class="promo-left">
+          <div class="promo-logo-row">
+            <div class="promo-logo"><img data-store-icon alt="" /></div>
+            <span>InfoFlow Picker</span>
+          </div>
+          <h1>Right-click images.<br />Save to GitHub.</h1>
+          <p class="tagline">Save any image from the web to your repo — pick multiple from the same post, add categories, and sync JSON + Markdown in one click.</p>
+          <div class="promo-chips">
+            <span>🖼️ Image save</span>
+            <span>Multi-image pick</span>
+            <span>Batch upload</span>
+            <span>Your repo only</span>
+          </div>
+        </div>
+        <div class="promo-right">
+          <div class="promo-mock">
+            <h3>InfoFlow Picker</h3>
+            <p class="hint-line">4 images in post · 2 selected</p>
+            <div class="img-grid">
+              <div class="img-cell on">
+                <div class="img-ph img-ph-1"></div>
+                <span class="img-check">✓</span>
+              </div>
+              <div class="img-cell"><div class="img-ph img-ph-2"></div></div>
+              <div class="img-cell on">
+                <div class="img-ph img-ph-3"></div>
+                <span class="img-check">✓</span>
+              </div>
+              <div class="img-cell"><div class="img-ph img-ph-4"></div></div>
+            </div>
+            <button type="button" class="mock-btn">💾 Save images to GitHub</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="../assets/icon-data.js"></script>
+  <script src="../assets/export.js"></script>
+  <script>
+    buildToolbar("Marquee promo tile", "small-tile.html", "../index.html", "promo-marquee-1400x560.png", 1400, 560, "Marquee promo tile / 顶部宣传图块");
+  </script>
+</body>
+</html>

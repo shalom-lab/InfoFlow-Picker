@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>InfoFlow Picker — Chrome Web Store Assets</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #0b1020; color: #e2e8f0;
+      max-width: 960px; margin: 0 auto; padding: 40px 24px 64px;
+    }
+    h1 { font-size: 28px; margin-bottom: 8px; }
+    .lead { color: #94a3b8; margin-bottom: 24px; line-height: 1.6; font-size: 14px; }
+    .notice {
+      background: rgba(99,102,241,0.12); border: 1px solid rgba(129,140,248,0.35);
+      border-radius: 10px; padding: 14px 16px; font-size: 13px; line-height: 1.55;
+      color: #c4b5fd; margin-bottom: 28px;
+    }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; margin: 28px 0 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 8px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.08); vertical-align: top; }
+    th { color: #94a3b8; font-weight: 600; }
+    td a { color: #a5b4fc; text-decoration: none; font-weight: 600; }
+    td a:hover { text-decoration: underline; }
+    .size { font-variant-numeric: tabular-nums; color: #f1f5f9; white-space: nowrap; }
+    .dim { color: #64748b; font-size: 12px; }
+    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .card {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px; padding: 16px; text-decoration: none; color: inherit;
+    }
+    .card:hover { background: rgba(255,255,255,0.1); }
+    .card .badge {
+      display: inline-block; font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.06em; color: #a5b4fc; background: rgba(99,102,241,0.2);
+      padding: 3px 8px; border-radius: 6px; margin-bottom: 8px;
+    }
+    .card h3 { font-size: 15px; margin-bottom: 4px; color: #f1f5f9; }
+    .card p { font-size: 12px; color: #94a3b8; }
+    .card .go { margin-top: 8px; font-size: 11px; font-weight: 600; color: #a5b4fc; }
+    .copy-box {
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px; padding: 16px; font-size: 13px; line-height: 1.6;
+    }
+    .copy-box strong { color: #f1f5f9; }
+    .batch-bar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+      background: linear-gradient(135deg, rgba(79,70,229,0.25), rgba(124,58,237,0.18));
+      border: 1px solid rgba(129,140,248,0.4); border-radius: 12px;
+      padding: 18px 20px; margin-bottom: 28px;
+    }
+    .batch-bar p { flex: 1; min-width: 200px; font-size: 13px; color: #c4b5fd; line-height: 1.5; }
+    .btn-batch {
+      appearance: none; border: none; cursor: pointer;
+      font-size: 14px; font-weight: 650; padding: 12px 20px; border-radius: 10px;
+      color: #fff; background: linear-gradient(135deg, #4f46e5, #7c3aed);
+      box-shadow: 0 4px 16px rgba(79,70,229,0.45); white-space: nowrap;
+    }
+    .btn-batch:hover:not(:disabled) { filter: brightness(1.06); }
+    .btn-batch:disabled { opacity: 0.65; cursor: wait; }
+    #batch-status { font-size: 12px; color: #94a3b8; width: 100%; min-height: 1.2em; }
+  </style>
+</head>
+<body>
+  <h1>Chrome Web Store assets</h1>
+  <p class="lead">Each image goes to a <strong>different</strong> upload slot in the Developer Dashboard — sizes are <strong>not</strong> all the same. Text → <a href="copy-paste/en-US.md" style="color:#a5b4fc">copy-paste/en-US.md</a></p>
+
+  <div class="batch-bar">
+    <p><strong style="color:#f1f5f9">One-click download</strong> — 7 files in one ZIP: icon 128×128, 4 screenshots 1280×800, 2 promo tiles (440×280 &amp; 1400×560). <em>Use http://localhost (not file://) for batch ZIP.</em></p>
+    <button type="button" class="btn-batch" id="download-all-btn">⬇ Download all (ZIP)</button>
+    <div id="batch-status"></div>
+  </div>
+
+  <div class="notice">
+    Dashboard slots use different canvas sizes: icon <strong>128×128</strong>, screenshots <strong>1280×800</strong>, small promo <strong>440×280</strong>, marquee promo <strong>1400×560</strong>. Open the matching page below and download the PNG at that exact size.
+  </div>
+
+  <h2>Text (paste in dashboard)</h2>
+  <div class="copy-box">
+    <p><strong>Title:</strong> InfoFlow Picker</p>
+    <p><strong>Summary:</strong> Save highlights &amp; images to GitHub with categories — right-click any image to capture and batch-save.</p>
+    <p><strong>Category:</strong> Productivity &nbsp;·&nbsp; <strong>Language:</strong> English</p>
+  </div>
+
+  <h2>All image slots</h2>
+  <table>
+    <tr><th>Dashboard upload slot</th><th>Required size</th><th>Generate / file</th></tr>
+    <tr>
+      <td>Store icon / 商店图标</td>
+      <td class="size">128 × 128</td>
+      <td><a href="icons/icon128.png">icons/icon128.png</a> (ready-made)</td>
+    </tr>
+    <tr>
+      <td>Screenshots / 屏幕截图 (1–5)</td>
+      <td class="size">1280 × 800</td>
+      <td><a href="screenshots/index.html">screenshots/</a> → 4 pages below</td>
+    </tr>
+    <tr>
+      <td>Small promo tile / 小型宣传图块</td>
+      <td class="size">440 × 280</td>
+      <td><a href="promo/small-tile.html">promo/small-tile.html</a></td>
+    </tr>
+    <tr>
+      <td>Marquee promo tile / 顶部宣传图块</td>
+      <td class="size">1400 × 560</td>
+      <td><a href="promo/marquee-tile.html">promo/marquee-tile.html</a></td>
+    </tr>
+  </table>
+  <p class="dim">Screenshots &amp; promo tiles: JPEG or 24-bit PNG, no alpha</p>
+
+  <h2>Screenshots only — 1280 × 800</h2>
+  <div class="cards">
+    <a class="card" href="screenshots/02-image-picker.html">
+      <span class="badge">Screenshots · 1280×800 · First</span>
+      <h3>02 · Save images</h3>
+      <p>Right-click images, multi-pick, batch save — lead screenshot</p>
+      <div class="go">Open &amp; download →</div>
+    </a>
+    <a class="card" href="screenshots/01-main-save.html">
+      <span class="badge">Screenshots · 1280×800</span>
+      <h3>01 · Text &amp; images</h3>
+      <p>Text highlights + image save workflow</p>
+      <div class="go">Open &amp; download →</div>
+    </a>
+    <a class="card" href="screenshots/04-overview.html">
+      <span class="badge">Screenshots · 1280×800</span>
+      <h3>04 · Overview</h3>
+      <p>Image save featured first in feature grid</p>
+      <div class="go">Open &amp; download →</div>
+    </a>
+    <a class="card" href="screenshots/03-settings.html">
+      <span class="badge">Screenshots · 1280×800</span>
+      <h3>03 · Settings</h3>
+      <p>GitHub repo config</p>
+      <div class="go">Open &amp; download →</div>
+    </a>
+  </div>
+
+  <h2>Promo tiles — other sizes</h2>
+  <div class="cards">
+    <a class="card" href="promo/small-tile.html">
+      <span class="badge">Small promo · 440×280</span>
+      <h3>Small promo tile</h3>
+      <p>Not a screenshot — separate upload slot</p>
+      <div class="go">Open &amp; download →</div>
+    </a>
+    <a class="card" href="promo/marquee-tile.html">
+      <span class="badge">Marquee promo · 1400×560</span>
+      <h3>Marquee promo tile</h3>
+      <p>Not a screenshot — separate upload slot</p>
+      <div class="go">Open &amp; download →</div>
+    </a>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="assets/icon-data.js"></script>
+  <script src="assets/export.js"></script>
+  <script src="assets/batch-download.js"></script>
+  <script>
+    StoreBatchDownload.initBatchDownload("download-all-btn", "batch-status");
+  </script>
+</body>
+</html>

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>01 — Save Text · InfoFlow Picker</title>
+  <link rel="stylesheet" href="assets/common.css" />
+  <style>
+    .glow-a { width: 260px; height: 260px; background: rgba(129,140,248,0.3); top: 0; right: 100px; }
+    .glow-b { width: 180px; height: 180px; background: rgba(244,114,182,0.2); bottom: 60px; left: 180px; }
+  </style>
+</head>
+<body>
+  <div id="capture">
+    <div class="frame-inner bg-mesh-light">
+      <div class="grid-dots"></div>
+      <div class="glow-orb glow-a"></div>
+      <div class="glow-orb glow-b"></div>
+      <div class="brand-mark">
+        <div class="brand-icon"><img data-store-icon alt="" /></div>
+        <div class="brand-text">InfoFlow Picker<span>Text &amp; images</span></div>
+      </div>
+      <div class="scene">
+        <div class="demo-col">
+          <div class="browser">
+            <div class="browser-bar">
+              <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+              <div class="url-bar">https://blog.example.com/design-notes</div>
+            </div>
+            <div class="browser-body">
+              <h2>Design reading notes</h2>
+              <p>
+                With InfoFlow Picker, I
+                <span class="highlight">highlight key paragraphs and save them to GitHub</span>
+                with source URL and category — ready for my InfoFlow workflow.
+              </p>
+            </div>
+          </div>
+          <div class="popup-mock">
+            <div class="popup-inner">
+              <h3>InfoFlow Picker</h3>
+              <div class="field-label">📝 Content</div>
+              <textarea class="field">highlight key paragraphs and save them to GitHub</textarea>
+              <div class="field-label">📁 Category</div>
+              <div class="field">Insight</div>
+              <div class="field-label">🔗 Source URL</div>
+              <textarea class="field field-sm">https://blog.example.com/design-notes</textarea>
+              <button type="button" class="btn-primary">💾 Save to GitHub</button>
+            </div>
+          </div>
+        </div>
+        <div class="hero-copy">
+          <h1 class="gradient">Text &amp; images.<br />Save to GitHub.</h1>
+          <p>Highlight text or right-click images. Auto-fill source URL, categories, JSON &amp; Markdown export.</p>
+          <div class="chip-row">
+            <span class="chip">🖼️ Save images</span>
+            <span class="chip">Context menu</span>
+            <span class="chip">Draft cache</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="../assets/icon-data.js"></script>
+  <script src="../assets/export.js"></script>
+  <script>
+    buildToolbar("01 · Text & images", null, "02-image-picker.html", "01-main-save-1280x800.png", 1280, 800, "Screenshots / 屏幕截图");
+  </script>
+</body>
+</html>

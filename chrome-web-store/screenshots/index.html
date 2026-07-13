@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>InfoFlow Picker — Store Screenshots</title>
+  <link rel="stylesheet" href="assets/common.css" />
+  <style>
+    body { padding-top: 88px; max-width: 880px; margin: 0 auto; color: #e2e8f0; align-items: stretch; }
+    h1 { font-size: 26px; margin-bottom: 8px; }
+    .lead { color: #94a3b8; margin-bottom: 16px; line-height: 1.6; font-size: 14px; }
+    .notice {
+      background: rgba(99,102,241,0.12); border: 1px solid rgba(129,140,248,0.3);
+      border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #c4b5fd;
+      margin-bottom: 24px; line-height: 1.5;
+    }
+    .notice a { color: #a5b4fc; }
+    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .card {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px; padding: 18px; text-decoration: none; color: inherit;
+      transition: background 0.15s, transform 0.15s;
+    }
+    .card:hover { background: rgba(255,255,255,0.1); transform: translateY(-2px); }
+    .card .badge {
+      display: inline-block; font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+      color: #a5b4fc; background: rgba(99,102,241,0.2); padding: 3px 8px;
+      border-radius: 6px; margin-bottom: 8px;
+    }
+    .card h2 { font-size: 17px; margin-bottom: 6px; color: #f1f5f9; }
+    .card p { font-size: 13px; color: #94a3b8; line-height: 1.5; }
+    .card .go { margin-top: 10px; font-size: 12px; font-weight: 600; color: #a5b4fc; }
+    .back { display: inline-block; margin-bottom: 20px; color: #a5b4fc; font-size: 13px; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header class="toolbar">
+    <span class="toolbar-title">Screenshots</span>
+    <span class="toolbar-hint">Dashboard: <strong>Screenshots / 屏幕截图</strong> · 1280 × 800 only</span>
+  </header>
+  <a class="back" href="../index.html">← All store assets · Download all ZIP</a>
+  <h1>Screenshots</h1>
+  <p class="lead">Upload <strong>02 · Save images</strong> first to highlight image saving. All export as <strong>1280×800</strong> PNGs.</p>
+  <div class="notice">
+    <strong>Tip:</strong> Lead with <a href="02-image-picker.html">02 · Save images</a> — it showcases the core image-save feature.
+    Promo tiles (440×280 / 1400×560) → <a href="../index.html">main index</a>.
+  </div>
+  <div class="cards">
+    <a class="card" href="02-image-picker.html">
+      <span class="badge">1280 × 800 · Upload first</span>
+      <h2>02 · Save images</h2>
+      <p>Right-click → multi-pick → batch save to GitHub</p>
+      <div class="go">Open &amp; download →</div>
+    </a>
+    <a class="card" href="01-main-save.html">
+      <span class="badge">1280 × 800</span>
+      <h2>01 · Text &amp; images</h2>
+      <p>Highlights + image save in one workflow</p>
+      <div class="go">Open &amp; download →</div>
+    </a>
+    <a class="card" href="03-settings.html">
+      <span class="badge">1280 × 800</span>
+      <h2>03 · GitHub settings</h2>
+      <p>Repo config &amp; local token storage</p>
+      <div class="go">Open &amp; download →</div>
+    </a>
+    <a class="card" href="04-overview.html">
+      <span class="badge">1280 × 800</span>
+      <h2>04 · Overview</h2>
+      <p>Feature summary &amp; workflow</p>
+      <div class="go">Open &amp; download →</div>
+    </a>
+  </div>
+</body>
+</html>

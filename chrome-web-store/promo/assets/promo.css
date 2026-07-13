@@ -1,0 +1,187 @@
+/* Promo tiles — Chrome Web Store (440×280 / 1400×560) */
+
+.frame-inner.bg-promo {
+  background:
+    radial-gradient(ellipse 70% 80% at 15% 50%, rgba(99,102,241,0.35), transparent 60%),
+    radial-gradient(ellipse 60% 70% at 90% 30%, rgba(236,72,153,0.22), transparent 55%),
+    linear-gradient(135deg, #1e1b4b 0%, #312e81 40%, #4c1d95 100%);
+}
+
+.frame-inner.bg-promo-light {
+  background:
+    radial-gradient(ellipse 65% 75% at 20% 40%, rgba(99,102,241,0.18), transparent 55%),
+    radial-gradient(ellipse 55% 65% at 85% 70%, rgba(236,72,153,0.12), transparent 50%),
+    linear-gradient(155deg, #f8fafc 0%, #eef2ff 45%, #fdf4ff 100%);
+}
+
+/* ── Small tile 440×280 ── */
+body.size-sm {
+  --frame-w: 440px;
+  --frame-h: 280px;
+}
+
+body.size-sm .promo-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 28px 32px;
+}
+
+body.size-sm .promo-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  box-shadow: 0 12px 32px rgba(79,70,229,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+body.size-sm .promo-logo img { width: 44px; height: 44px; object-fit: contain; }
+
+body.size-sm .promo-text h1 {
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin-bottom: 6px;
+}
+body.size-sm .promo-text p {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #c4b5fd;
+  max-width: 280px;
+}
+
+/* ── Marquee 1400×560 ── */
+body.size-lg {
+  --frame-w: 1400px;
+  --frame-h: 560px;
+}
+
+body.size-lg .promo-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 48px 64px;
+  gap: 48px;
+}
+
+body.size-lg .promo-left { flex: 1; min-width: 0; }
+
+body.size-lg .promo-logo-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+body.size-lg .promo-logo {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  box-shadow: 0 12px 32px rgba(79,70,229,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+body.size-lg .promo-logo img { width: 40px; height: 40px; object-fit: contain; }
+
+body.size-lg .promo-logo-row span {
+  font-size: 14px;
+  font-weight: 600;
+  color: #a5b4fc;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+body.size-lg .promo-left h1 {
+  font-size: 52px;
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  background: linear-gradient(135deg, #fff 0%, #c4b5fd 60%, #f0abfc 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 16px;
+}
+
+body.size-lg .promo-left .tagline {
+  font-size: 20px;
+  line-height: 1.5;
+  color: #cbd5e1;
+  max-width: 520px;
+  margin-bottom: 28px;
+}
+
+body.size-lg .promo-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+body.size-lg .promo-chips span {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: #e9d5ff;
+}
+
+body.size-lg .promo-right {
+  width: 480px;
+  flex-shrink: 0;
+}
+
+body.size-lg .promo-mock {
+  background: rgba(255,255,255,0.95);
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.35);
+  color: #0f172a;
+}
+
+body.size-lg .promo-mock h3 {
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+body.size-lg .promo-mock .mock-field {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #475569;
+  margin-bottom: 8px;
+  background: #fff;
+}
+
+body.size-lg .promo-mock .mock-field.hl {
+  background: linear-gradient(120deg, #fef08a, #fde047);
+  color: #713f12;
+  border-color: #fcd34d;
+}
+
+body.size-lg .promo-mock .mock-btn {
+  width: 100%;
+  margin-top: 4px;
+  padding: 12px;
+  border: none;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 650;
+  color: #fff;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+}
