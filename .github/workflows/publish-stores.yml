@@ -51,13 +51,16 @@ jobs:
           zip -r "../../InfoFlow-Extractor-chrome-${{ steps.tag.outputs.version }}.zip" .
 
       - name: Upload to Chrome Web Store
-        if: ${{ secrets.CHROME_EXTENSION_ID && secrets.CHROME_CLIENT_ID && secrets.CHROME_CLIENT_SECRET && secrets.CHROME_REFRESH_TOKEN }}
         env:
           EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
           CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
         run: |
+          if [ -z "$EXTENSION_ID" ] || [ -z "$CLIENT_ID" ] || [ -z "$CLIENT_SECRET" ] || [ -z "$REFRESH_TOKEN" ]; then
+            echo "Missing Chrome Web Store secrets. Configure CHROME_EXTENSION_ID, CHROME_CLIENT_ID, CHROME_CLIENT_SECRET, and CHROME_REFRESH_TOKEN in repository secrets."
+            exit 1
+          fi
           npx chrome-webstore-upload-cli upload \
             --extension-id "$EXTENSION_ID" \
             --client-id "$CLIENT_ID" \
