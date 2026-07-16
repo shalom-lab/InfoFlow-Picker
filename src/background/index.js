@@ -2,12 +2,39 @@ import browser from 'webextension-polyfill';
 import { getSettings } from '../utils/storage.js';
 import { PENDING_CAPTURE_KEY } from '../utils/draft.js';
 import { sendToContentScript } from '../utils/injectContent.js';
+import {
+  SYNC_ALARM_NAME,
+  MAX_SYNC_ATTEMPTS,
+  enqueueSync,
+  getSyncQueue,
+  getSyncSummary,
+  updateSyncItem,
+  removeSyncItem,
+  scheduleSyncAlarm,
+  nextRetryDelayMinutes,
+  updateSyncBadge,
+} from '../utils/syncQueue.js';
 
 const CONTEXT_MENU_ID = 'infoflow-extract';
 
+let syncProcessing = false;
+
 browser.runtime.onInstalled.addListener(() => {
   setupContextMenu();
+  processSyncQueue().catch((err) => console.error('Initial sync failed:', err));
 });
+
+browser.runtime.onStartup?.addListener(() => {
+  processSyncQueue().catch((err) => console.error('Startup sync failed:', err));
+});
+
+if (browser.alarms?.onAlarm) {
+  browser.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === SYNC_ALARM_NAME) {
+      processSyncQueue().catch((err) => console.error('Alarm sync failed:', err));
+    }
+  });
+}
 
 async function setupContextMenu() {
   try {
@@ -74,14 +101,50 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
   await browser.action.openPopup?.().catch(() => {});
 });
 
-browser.runtime.onMessage.addListener((message, sender) => {
+browser.runtime.onMessage.addListener((message) => {
   if (message?.type === 'SAVE_SELECTION') {
-    return handleSaveSelection(message.payload);
+    return enqueueSaveSelection(message.payload);
+  }
+  if (message?.type === 'GET_SYNC_STATUS') {
+    return getSyncSummary();
+  }
+  if (message?.type === 'RETRY_SYNC') {
+    return (async () => {
+      const queue = await getSyncQueue();
+      for (const item of queue) {
+        if (item.status === 'failed' || item.status === 'pending' || item.status === 'uploading') {
+          await updateSyncItem(item.id, {
+            status: 'pending',
+            attempts: 0,
+            lastError: null,
+          });
+        }
+      }
+      await processSyncQueue();
+      return getSyncSummary();
+    })();
   }
   return undefined;
 });
 
-async function handleSaveSelection(payload) {
+/** Validate + persist locally, return immediately; upload continues in background. */
+async function enqueueSaveSelection(payload) {
+  const normalized = normalizeSavePayload(payload);
+  await assertGithubSettings();
+
+  const item = await enqueueSync(normalized);
+  // Kick upload without blocking the popup response path beyond enqueue.
+  processSyncQueue().catch((err) => console.error('Sync queue error:', err));
+  await scheduleSyncAlarm(0.2);
+
+  return {
+    ok: true,
+    queued: true,
+    id: item.id,
+  };
+}
+
+function normalizeSavePayload(payload) {
   const content = payload?.content?.trim() || '';
   const category = payload?.category?.trim();
   const url = payload?.url?.trim() || '';
@@ -93,15 +156,26 @@ async function handleSaveSelection(payload) {
     Math.max(payload?.primaryIndex ?? 0, 0),
     Math.max(imagesToUpload.length - 1, 0),
   );
-  
+
   if (!category) {
     throw new Error('Invalid payload: category is required');
   }
-  
   if (!content && imagesToUpload.length === 0) {
     throw new Error('Invalid payload: content or image is required');
   }
 
+  return {
+    content,
+    category,
+    url,
+    notes,
+    image: imagesToUpload[primaryUploadIndex] ?? image ?? null,
+    images: imagesToUpload,
+    primaryIndex: primaryUploadIndex,
+  };
+}
+
+async function assertGithubSettings() {
   const settings = await getSettings();
   const missing = [];
   if (!settings.github.token || settings.github.token.trim() === '') {
@@ -113,7 +187,7 @@ async function handleSaveSelection(payload) {
   if (!settings.github.repo || settings.github.repo.trim() === '') {
     missing.push('repo');
   }
-  
+
   if (missing.length > 0) {
     console.error('GitHub settings check failed:', {
       hasToken: !!settings.github.token,
@@ -124,14 +198,92 @@ async function handleSaveSelection(payload) {
     throw new Error(`Missing GitHub settings: ${missing.join(', ')}`);
   }
 
+  return settings;
+}
+
+async function processSyncQueue() {
+  if (syncProcessing) return;
+  syncProcessing = true;
+
+  try {
+    // Reset stuck "uploading" after SW kill mid-flight.
+    const queue = await getSyncQueue();
+    for (const item of queue) {
+      if (item.status === 'uploading') {
+        await updateSyncItem(item.id, { status: 'pending' });
+      }
+    }
+
+    while (true) {
+      const current = await getSyncQueue();
+      const next = current.find(
+        (item) =>
+          (item.status === 'pending' || item.status === 'failed') &&
+          item.attempts < MAX_SYNC_ATTEMPTS,
+      );
+      if (!next) break;
+
+      await updateSyncItem(next.id, {
+        status: 'uploading',
+        attempts: next.attempts + 1,
+      });
+
+      try {
+        await uploadSelectionToGitHub(next.payload);
+        await removeSyncItem(next.id);
+      } catch (error) {
+        const message = error?.message || String(error);
+        console.error('Sync item failed:', next.id, message);
+        const attempts = next.attempts + 1;
+        await updateSyncItem(next.id, {
+          status: 'failed',
+          lastError: message,
+          attempts,
+        });
+        await scheduleSyncAlarm(nextRetryDelayMinutes(attempts));
+        // Stop this pass; alarm will retry so we don't tight-loop on bad network.
+        break;
+      }
+    }
+
+    const summary = await getSyncSummary();
+    if (summary.pending > 0 || summary.failed > 0) {
+      await scheduleSyncAlarm(nextRetryDelayMinutes(1));
+    }
+    await updateSyncBadge();
+  } finally {
+    syncProcessing = false;
+  }
+}
+
+async function uploadSelectionToGitHub(payload) {
+  const content = payload?.content?.trim() || '';
+  const category = payload?.category?.trim();
+  const url = payload?.url?.trim() || '';
+  const notes = payload?.notes?.trim() || '';
+  const image = payload?.image;
+  const images = Array.isArray(payload?.images) ? payload.images.filter(Boolean) : [];
+  const imagesToUpload = images.length > 0 ? images : image ? [image] : [];
+  const primaryUploadIndex = Math.min(
+    Math.max(payload?.primaryIndex ?? 0, 0),
+    Math.max(imagesToUpload.length - 1, 0),
+  );
+
+  if (!category) {
+    throw new Error('Invalid payload: category is required');
+  }
+  if (!content && imagesToUpload.length === 0) {
+    throw new Error('Invalid payload: content or image is required');
+  }
+
+  const settings = await assertGithubSettings();
   const safeCategory = category.replace(/[\\/:*?"<>|]/g, '_');
   const time = new Date().toISOString().replace(/[:.]/g, '-');
   const base = settings.github.basePath || 'infoflow-data';
-  
+
   let imagePath = null;
   let imagePaths = [];
-  
-  // 处理图片上传 - 统一使用PNG扩展名
+
   if (imagesToUpload.length > 0) {
     const extension = 'png';
     const randomSuffix = Math.random().toString(36).substring(2, 8);
@@ -152,19 +304,16 @@ async function handleSaveSelection(payload) {
 
     imagePath = imagePaths[primaryUploadIndex] ?? imagePaths[0] ?? null;
   }
-  
-  // 根据配置的格式上传文件
+
   const formats = settings.outputFormats || 'json+md';
   const shouldUploadJson = formats === 'json+md' || formats === 'json';
   const shouldUploadMd = formats === 'json+md' || formats === 'md';
-  
+
   if (content) {
-    // 有内容时，根据格式上传json和/或md
     const uploads = [];
-    
     const relativeImagePaths = toRelativeImagePaths(imagePaths, safeCategory);
     const relativeImagePath = relativeImagePaths[primaryUploadIndex] ?? relativeImagePaths[0] ?? null;
-    
+
     if (shouldUploadJson) {
       const jsonPath = buildFilePath(settings, category, 'json');
       const jsonContent = buildContent('json', {
@@ -177,7 +326,7 @@ async function handleSaveSelection(payload) {
       });
       uploads.push({ filePath: jsonPath, content: jsonContent });
     }
-    
+
     if (shouldUploadMd) {
       const mdPath = buildFilePath(settings, category, 'md');
       const mdContent = buildContent('md', {
@@ -190,11 +339,10 @@ async function handleSaveSelection(payload) {
       });
       uploads.push({ filePath: mdPath, content: mdContent });
     }
-    
-    // 并行上传所有文件
+
     await Promise.all(
-      uploads.map(({ filePath, content }) =>
-        uploadToGitHub({ filePath, content, settings }),
+      uploads.map(({ filePath, content: fileContent }) =>
+        uploadToGitHub({ filePath, content: fileContent, settings }),
       ),
     );
   } else if (imagePath) {
@@ -202,7 +350,7 @@ async function handleSaveSelection(payload) {
     const relativeImagePath = relativeImagePaths[primaryUploadIndex] ?? relativeImagePaths[0] ?? null;
     const uploads = [];
     const randomSuffix = Math.random().toString(36).substring(2, 8);
-    
+
     if (shouldUploadJson) {
       const jsonPath = `${base}/${safeCategory}/${time}-${randomSuffix}.json`;
       const jsonContent = buildImageOnlyContent('json', {
@@ -214,7 +362,7 @@ async function handleSaveSelection(payload) {
       });
       uploads.push({ filePath: jsonPath, content: jsonContent });
     }
-    
+
     if (shouldUploadMd) {
       const mdPath = `${base}/${safeCategory}/${time}-${randomSuffix}.md`;
       const mdContent = buildImageOnlyMarkdown({
@@ -226,11 +374,10 @@ async function handleSaveSelection(payload) {
       });
       uploads.push({ filePath: mdPath, content: mdContent });
     }
-    
-    // 并行上传所有文件
+
     await Promise.all(
-      uploads.map(({ filePath, content }) =>
-        uploadToGitHub({ filePath, content, settings }),
+      uploads.map(({ filePath, content: fileContent }) =>
+        uploadToGitHub({ filePath, content: fileContent, settings }),
       ),
     );
   }

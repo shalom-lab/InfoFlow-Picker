@@ -87,7 +87,11 @@ Injects a bundled content script into the **active tab only** when the user clic
 
 ### storage justification
 
-Stores locally: GitHub settings (token kept on device, not synced), categories, language, and unsaved capture drafts so content is not lost when the popup closes. Token is not sent to third parties except GitHub API calls chosen by the user.
+Stores locally: GitHub settings (token kept on device, not synced), categories, language, unsaved capture drafts, and a **sync queue** of captures waiting to upload so the popup can close immediately without losing data. Token is not sent to third parties except GitHub API calls chosen by the user.
+
+### alarms justification
+
+Wakes the service worker on a short delay to finish or retry GitHub uploads after the popup is closed. Used only for the sync queue — not for tracking or unrelated polling.
 
 ### tabs justification
 

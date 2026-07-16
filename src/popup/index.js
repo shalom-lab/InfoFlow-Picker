@@ -29,6 +29,7 @@ const imageGroupHint = document.getElementById('image-group-hint');
 const imageGroupGrid = document.getElementById('image-group-grid');
 const imageGroupSelectAllBtn = document.getElementById('image-group-select-all');
 const imageGroupSelectCurrentBtn = document.getElementById('image-group-select-current');
+const retrySyncBtn = document.getElementById('retry-sync-btn');
 
 // 视图元素
 const saveView = document.getElementById('save-view');
@@ -70,10 +71,12 @@ async function init() {
   
   await Promise.all([loadSavedFormState(), loadSourceUrl()]);
   loadSettingsForm(settings);
+  await refreshSyncStatus();
   
   optionsBtn.addEventListener('click', toggleView);
   saveBtn.addEventListener('click', handleSave);
   saveSettingsBtn.addEventListener('click', handleSaveSettings);
+  retrySyncBtn?.addEventListener('click', handleRetrySync);
   imageSelectBtn.addEventListener('click', () => imageInput.click());
   imageInput.addEventListener('change', handleImageSelect);
   imageRemoveBtn.addEventListener('click', handleImageRemove);
@@ -141,6 +144,9 @@ function applyTranslations() {
     'notesLabel',
   );
   saveBtn.textContent = t(currentLanguage, 'saveButton');
+  if (retrySyncBtn) {
+    retrySyncBtn.textContent = t(currentLanguage, 'retrySyncButton');
+  }
   
   // 设置视图翻译
   document.getElementById('settings-language-label').textContent = t(
@@ -188,7 +194,7 @@ function applyTranslations() {
   }
   // refresh current status messages with new language
   if (statusState.key) {
-    applyStatus(statusEl, statusState.key, statusState.tone);
+    applyStatus(statusEl, statusState.key, statusState.tone, statusState.vars);
   }
   if (settingsStatusState.key) {
     applyStatus(settingsStatusEl, settingsStatusState.key, settingsStatusState.tone);
@@ -742,6 +748,7 @@ async function handleSave() {
       };
     }
     
+    // Persist to local sync queue first; GitHub upload continues after popup may close.
     await browser.runtime.sendMessage({
       type: 'SAVE_SELECTION',
       payload: {
@@ -755,15 +762,15 @@ async function handleSave() {
       },
     });
     
-    setStatus('statusSuccess', 'success');
+    setStatus('statusQueued', 'success');
     await clearSaveDraft();
 
-    setTimeout(() => {
-      contentEl.value = '';
-      notesEl.value = '';
-      sourceUrlEl.value = '';
-      clearImageState();
-    }, 1500);
+    contentEl.value = '';
+    notesEl.value = '';
+    sourceUrlEl.value = '';
+    clearImageState();
+
+    await refreshSyncStatus();
   } catch (error) {
     console.error('Save error:', error);
     if (error?.message?.includes('GitHub') || error?.message?.includes('Missing GitHub')) {
@@ -777,9 +784,58 @@ async function handleSave() {
   }
 }
 
-function setStatus(key, tone = 'info') {
-  statusState = { key, tone };
-  applyStatus(statusEl, key, tone);
+function setStatus(key, tone = 'info', vars = null) {
+  statusState = { key, tone, vars };
+  applyStatus(statusEl, key, tone, vars);
+}
+
+async function refreshSyncStatus() {
+  try {
+    const summary = await browser.runtime.sendMessage({ type: 'GET_SYNC_STATUS' });
+    if (!summary || summary.total === 0) {
+      if (retrySyncBtn) retrySyncBtn.style.display = 'none';
+      if (statusState.key === 'statusQueued') return;
+      if (
+        statusState.key === 'statusSyncPending' ||
+        statusState.key === 'statusSyncFailed'
+      ) {
+        setStatus('statusIdle', 'muted');
+      }
+      return;
+    }
+
+    if (retrySyncBtn) {
+      retrySyncBtn.style.display = summary.failed > 0 || summary.pending > 0 ? 'block' : 'none';
+    }
+
+    // Don't override the just-queued success message immediately.
+    if (statusState.key === 'statusQueued') return;
+
+    if (summary.failed > 0) {
+      setStatus('statusSyncFailed', 'error', { n: summary.failed });
+    } else if (summary.pending > 0) {
+      setStatus('statusSyncPending', 'progress', { n: summary.pending });
+    }
+  } catch (error) {
+    console.error('Failed to load sync status:', error);
+  }
+}
+
+async function handleRetrySync() {
+  if (retrySyncBtn) retrySyncBtn.disabled = true;
+  try {
+    setStatus('statusSaving', 'progress');
+    await browser.runtime.sendMessage({ type: 'RETRY_SYNC' });
+    await refreshSyncStatus();
+    if (statusState.key === 'statusSaving') {
+      setStatus('statusQueued', 'success');
+    }
+  } catch (error) {
+    console.error('Retry sync failed:', error);
+    setStatus('statusError', 'error');
+  } finally {
+    if (retrySyncBtn) retrySyncBtn.disabled = false;
+  }
 }
 
 function loadSettingsForm(settings) {
@@ -832,7 +888,7 @@ function setSettingsStatus(key, tone = 'info') {
   applyStatus(settingsStatusEl, key, tone);
 }
 
-function applyStatus(element, key, tone) {
+function applyStatus(element, key, tone, vars = null) {
   if (!element) return;
   if (!key) {
     element.textContent = '';
@@ -840,7 +896,13 @@ function applyStatus(element, key, tone) {
     element.removeAttribute('data-tone');
     return;
   }
-  element.textContent = t(currentLanguage, key);
+  let text = t(currentLanguage, key);
+  if (vars) {
+    Object.entries(vars).forEach(([k, v]) => {
+      text = text.replace(`{${k}}`, String(v));
+    });
+  }
+  element.textContent = text;
   element.dataset.tone = tone;
   element.classList.add('visible');
 }

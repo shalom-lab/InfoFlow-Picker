@@ -8,6 +8,7 @@
     "contextMenus",
     "tabs",
     "activeTab",
+    "alarms",
     "<all_urls>"
   ],
   "background": {
