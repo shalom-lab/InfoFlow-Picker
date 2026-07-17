@@ -59,7 +59,7 @@ jobs:
           cd dist/chrome
           zip -r "../../InfoFlow-Extractor-chrome-${{ steps.tag.outputs.version }}.zip" .
 
-      - name: Upload to Chrome Web Store
+      - name: Upload and publish to Chrome Web Store
         env:
           EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
           CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
@@ -70,10 +70,11 @@ jobs:
             echo "Missing Chrome Web Store secrets. Configure CHROME_EXTENSION_ID, CHROME_CLIENT_ID, CHROME_CLIENT_SECRET, and CHROME_REFRESH_TOKEN in repository secrets."
             exit 1
           fi
-          npx chrome-webstore-upload-cli upload \
+          # No subcommand = upload + publish (replaces deprecated --auto-publish).
+          # Bare `upload` only creates a draft and leaves "已发布" on the old version.
+          npx chrome-webstore-upload-cli \
             --extension-id "$EXTENSION_ID" \
             --client-id "$CLIENT_ID" \
             --client-secret "$CLIENT_SECRET" \
             --refresh-token "$REFRESH_TOKEN" \
-            --source "InfoFlow-Extractor-chrome-${{ steps.tag.outputs.version }}.zip" \
-            --publish-target default
+            --source "InfoFlow-Extractor-chrome-${{ steps.tag.outputs.version }}.zip"
