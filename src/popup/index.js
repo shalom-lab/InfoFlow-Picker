@@ -30,6 +30,9 @@ const imageGroupGrid = document.getElementById('image-group-grid');
 const imageGroupSelectAllBtn = document.getElementById('image-group-select-all');
 const imageGroupSelectCurrentBtn = document.getElementById('image-group-select-current');
 const retrySyncBtn = document.getElementById('retry-sync-btn');
+const syncQueuePanel = document.getElementById('sync-queue-panel');
+const syncQueueToggle = document.getElementById('sync-queue-toggle');
+const syncQueueList = document.getElementById('sync-queue-list');
 
 // 视图元素
 const saveView = document.getElementById('save-view');
@@ -58,6 +61,8 @@ let currentImageUrl = null; // 存储图片URL（用于预览）
 /** @type {{ images: Array<{url: string, base64?: string, type?: string}>, clickedIndex: number, selected: Set<number> } | null} */
 let imageGroupState = null;
 let persistDraftTimer = null;
+let syncQueueExpanded = false;
+let lastSyncSummary = null;
 
 init();
 
@@ -70,6 +75,7 @@ async function init() {
   clearImageState();
   
   await Promise.all([loadSavedFormState(), loadSourceUrl()]);
+  await tryFillContentFromClipboard();
   loadSettingsForm(settings);
   await refreshSyncStatus();
   
@@ -77,6 +83,8 @@ async function init() {
   saveBtn.addEventListener('click', handleSave);
   saveSettingsBtn.addEventListener('click', handleSaveSettings);
   retrySyncBtn?.addEventListener('click', handleRetrySync);
+  syncQueueToggle?.addEventListener('click', handleSyncQueueToggle);
+  syncQueueList?.addEventListener('click', handleSyncQueueListClick);
   imageSelectBtn.addEventListener('click', () => imageInput.click());
   imageInput.addEventListener('change', handleImageSelect);
   imageRemoveBtn.addEventListener('click', handleImageRemove);
@@ -147,6 +155,7 @@ function applyTranslations() {
   if (retrySyncBtn) {
     retrySyncBtn.textContent = t(currentLanguage, 'retrySyncButton');
   }
+  updateSyncQueueToggleLabel();
   
   // 设置视图翻译
   document.getElementById('settings-language-label').textContent = t(
@@ -288,7 +297,7 @@ function applyDraftToForm(draft) {
   const groupImages = group?.images?.length > 1 ? group.images : null;
   const selectedIndices = Array.isArray(draft.imageGroupSelected) && draft.imageGroupSelected.length
     ? draft.imageGroupSelected
-    : [clickedIndex];
+    : (groupImages ? groupImages.map((_, index) => index) : [clickedIndex]);
 
   if (groupImages) {
     const images = groupImages.map((item, index) => {
@@ -439,6 +448,20 @@ async function tryLoadSelectionFromActiveTab() {
     contentEl.value = response?.text ?? '';
   } catch {
     contentEl.value = '';
+  }
+}
+
+/** When content is still empty after draft/selection load, fill from clipboard. */
+async function tryFillContentFromClipboard() {
+  if (contentEl.value.trim()) return;
+  try {
+    if (!navigator.clipboard?.readText) return;
+    const text = (await navigator.clipboard.readText())?.trim();
+    if (!text) return;
+    contentEl.value = text;
+    schedulePersistDraft();
+  } catch {
+    // Permission denied or clipboard unavailable — ignore silently.
   }
 }
 
@@ -792,6 +815,9 @@ function setStatus(key, tone = 'info', vars = null) {
 async function refreshSyncStatus() {
   try {
     const summary = await browser.runtime.sendMessage({ type: 'GET_SYNC_STATUS' });
+    lastSyncSummary = summary;
+    renderSyncQueue(summary);
+
     if (!summary || summary.total === 0) {
       if (retrySyncBtn) retrySyncBtn.style.display = 'none';
       if (statusState.key === 'statusQueued') return;
@@ -818,6 +844,129 @@ async function refreshSyncStatus() {
     }
   } catch (error) {
     console.error('Failed to load sync status:', error);
+  }
+}
+
+function updateSyncQueueToggleLabel() {
+  if (!syncQueueToggle) return;
+  const count = lastSyncSummary?.total ?? 0;
+  syncQueueToggle.textContent = syncQueueExpanded
+    ? t(currentLanguage, 'syncQueueToggleHide')
+    : tFmt('syncQueueToggleShow', { n: count });
+}
+
+function renderSyncQueue(summary) {
+  if (!syncQueuePanel || !syncQueueList || !syncQueueToggle) return;
+
+  if (!summary || summary.total === 0) {
+    syncQueuePanel.classList.remove('visible');
+    syncQueueList.classList.remove('expanded');
+    syncQueueList.innerHTML = '';
+    syncQueueExpanded = false;
+    return;
+  }
+
+  syncQueuePanel.classList.add('visible');
+  syncQueueList.classList.toggle('expanded', syncQueueExpanded);
+  updateSyncQueueToggleLabel();
+
+  const statusLabel = {
+    pending: t(currentLanguage, 'syncQueueStatusPending'),
+    uploading: t(currentLanguage, 'syncQueueStatusUploading'),
+    failed: t(currentLanguage, 'syncQueueStatusFailed'),
+  };
+
+  syncQueueList.innerHTML = '';
+  for (const item of summary.items) {
+    const row = document.createElement('div');
+    row.className = 'sync-queue-item';
+    row.setAttribute('role', 'listitem');
+    row.dataset.id = item.id;
+
+    const meta = document.createElement('div');
+    meta.className = 'sync-queue-item-meta';
+
+    const badge = document.createElement('span');
+    badge.className = 'sync-queue-badge';
+    badge.dataset.status = item.status;
+    badge.textContent = statusLabel[item.status] || item.status;
+
+    const preview = document.createElement('span');
+    preview.className = 'sync-queue-preview';
+    const raw = (item.payload?.content || '').trim().replace(/\s+/g, ' ');
+    preview.textContent = raw
+      ? (raw.length > 48 ? `${raw.slice(0, 48)}…` : raw)
+      : t(currentLanguage, 'syncQueueEmptyPreview');
+    preview.title = raw || preview.textContent;
+
+    meta.append(badge, preview);
+
+    if (item.attempts > 0) {
+      const attempts = document.createElement('span');
+      attempts.style.color = '#94a3b8';
+      attempts.style.fontSize = '10px';
+      attempts.textContent = tFmt('syncQueueAttempts', { n: item.attempts });
+      meta.appendChild(attempts);
+    }
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'sync-queue-cancel';
+    cancelBtn.dataset.action = 'cancel';
+    cancelBtn.dataset.id = item.id;
+    cancelBtn.textContent = t(currentLanguage, 'syncQueueCancel');
+
+    row.append(meta, cancelBtn);
+
+    if (item.lastError) {
+      const err = document.createElement('div');
+      err.className = 'sync-queue-error';
+      err.textContent = item.lastError;
+      err.title = item.lastError;
+      row.appendChild(err);
+    }
+
+    syncQueueList.appendChild(row);
+  }
+}
+
+function handleSyncQueueToggle() {
+  syncQueueExpanded = !syncQueueExpanded;
+  if (syncQueueList) {
+    syncQueueList.classList.toggle('expanded', syncQueueExpanded);
+  }
+  updateSyncQueueToggleLabel();
+}
+
+async function handleSyncQueueListClick(event) {
+  const btn = event.target.closest('[data-action="cancel"]');
+  if (!btn?.dataset.id) return;
+  btn.disabled = true;
+  try {
+    const summary = await browser.runtime.sendMessage({
+      type: 'CANCEL_SYNC_ITEM',
+      id: btn.dataset.id,
+    });
+    lastSyncSummary = summary;
+    renderSyncQueue(summary);
+    if (!summary || summary.total === 0) {
+      if (retrySyncBtn) retrySyncBtn.style.display = 'none';
+      setStatus('statusIdle', 'muted');
+      return;
+    }
+    if (retrySyncBtn) {
+      retrySyncBtn.style.display = summary.failed > 0 || summary.pending > 0 ? 'block' : 'none';
+    }
+    if (summary.failed > 0) {
+      setStatus('statusSyncFailed', 'error', { n: summary.failed });
+    } else if (summary.pending > 0) {
+      setStatus('statusSyncPending', 'progress', { n: summary.pending });
+    } else {
+      setStatus('statusIdle', 'muted');
+    }
+  } catch (error) {
+    console.error('Cancel sync item failed:', error);
+    btn.disabled = false;
   }
 }
 

@@ -9,7 +9,8 @@
     "tabs",
     "scripting",
     "activeTab",
-    "alarms"
+    "alarms",
+    "clipboardRead"
   ],
   "host_permissions": [
     "https://api.github.com/*"

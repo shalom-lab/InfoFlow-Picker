@@ -9,6 +9,7 @@
     "tabs",
     "activeTab",
     "alarms",
+    "clipboardRead",
     "<all_urls>"
   ],
   "background": {

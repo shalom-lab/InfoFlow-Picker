@@ -124,6 +124,12 @@ browser.runtime.onMessage.addListener((message) => {
       return getSyncSummary();
     })();
   }
+  if (message?.type === 'CANCEL_SYNC_ITEM' && message.id) {
+    return (async () => {
+      await removeSyncItem(message.id);
+      return getSyncSummary();
+    })();
+  }
   return undefined;
 });
 

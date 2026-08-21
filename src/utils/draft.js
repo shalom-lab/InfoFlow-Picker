@@ -86,8 +86,9 @@ export function mergePendingIntoDraft(pending, existingDraft = null) {
     next.imageUrl = pending.imageUrl;
     next.imageData = pending.imageData ?? null;
     next.imageGroup = pending.imageGroup ?? null;
-    next.imageGroupSelected = pending.imageGroup?.clickedIndex != null
-      ? [pending.imageGroup.clickedIndex]
+    // Default: select every image in the post group.
+    next.imageGroupSelected = pending.imageGroup?.images?.length
+      ? pending.imageGroup.images.map((_, index) => index)
       : [0];
   }
 
