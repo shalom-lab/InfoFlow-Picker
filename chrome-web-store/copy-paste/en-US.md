@@ -93,6 +93,10 @@ Stores locally: GitHub settings (token kept on device, not synced), categories, 
 
 Wakes the service worker on a short delay to finish or retry GitHub uploads after the popup is closed. Used only for the sync queue — not for tracking or unrelated polling.
 
+### clipboardRead justification
+
+Reads the system clipboard when the user opens the save popup so the content field can be filled with the text they most recently copied (Ctrl+C), if the page has no active selection. Used only on popup open for that form field; clipboard data is not sent anywhere except the user’s GitHub upload they confirm.
+
 ### tabs justification
 
 Reads the active tab URL as the source link and messages the content script on that tab to retrieve selection. Not used for history analytics or cross-site tracking.

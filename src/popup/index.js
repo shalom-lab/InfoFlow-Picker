@@ -2,7 +2,6 @@ import browser from 'webextension-polyfill';
 import { getSettings, saveSettings, DEFAULT_CATEGORIES } from '../utils/storage.js';
 import {
   clearSaveDraft,
-  emptyDraft,
   getPendingCapture,
   getSaveDraft,
   mergePendingIntoDraft,
@@ -75,7 +74,6 @@ async function init() {
   clearImageState();
   
   await Promise.all([loadSavedFormState(), loadSourceUrl()]);
-  await tryFillContentFromClipboard();
   loadSettingsForm(settings);
   await refreshSyncStatus();
   
@@ -247,10 +245,9 @@ async function loadSavedFormState() {
     getSaveDraft(),
   ]);
 
-  let draft = existingDraft ?? emptyDraft();
-
+  // Explicit context-menu capture always wins for that open.
   if (pending) {
-    draft = mergePendingIntoDraft(
+    const draft = mergePendingIntoDraft(
       {
         content: pending.content,
         url: pending.url,
@@ -263,18 +260,85 @@ async function loadSavedFormState() {
     await clearPendingCapture();
     await setSaveDraft(draft);
     applyDraftToForm(draft);
+    // Image-only capture: still fill empty content from selection/clipboard.
+    if (!String(draft.content || '').trim()) {
+      await preferFreshContentText({ overrideDraft: true });
+      await persistDraftNow();
+    }
     return;
   }
 
+  // Restore notes / category / images / previous fields first…
   if (existingDraft) {
     applyDraftToForm(existingDraft);
-    return;
   }
 
-  await tryLoadSelectionFromActiveTab();
-  const captured = collectDraftFromForm();
-  if (captured.content || captured.url) {
-    await setSaveDraft(captured);
+  // …then prefer the latest page selection or clipboard over stale draft text.
+  // (Draft persistence was winning and showed “previous copy” content.)
+  const refreshed = await preferFreshContentText({ overrideDraft: true });
+  if (refreshed || existingDraft) {
+    await persistDraftNow();
+  }
+}
+
+/**
+ * Prefer live selection, then system clipboard, over persisted draft content.
+ * @returns {'selection' | 'clipboard' | null}
+ */
+async function preferFreshContentText({ overrideDraft = false } = {}) {
+  const selection = await readSelectionFromActiveTab();
+  if (selection) {
+    if (overrideDraft || !contentEl.value.trim()) {
+      contentEl.value = selection;
+    }
+    return 'selection';
+  }
+
+  const clip = await readClipboardText();
+  if (clip) {
+    if (overrideDraft || !contentEl.value.trim()) {
+      contentEl.value = clip;
+    }
+    return 'clipboard';
+  }
+
+  return null;
+}
+
+async function readSelectionFromActiveTab() {
+  const [tab] = await browser.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  if (!tab?.id || !tab.url) return '';
+
+  if (
+    tab.url.startsWith('chrome://') ||
+    tab.url.startsWith('edge://') ||
+    tab.url.startsWith('about:') ||
+    tab.url.startsWith('moz-extension://') ||
+    tab.url.startsWith('chrome-extension://')
+  ) {
+    return '';
+  }
+
+  try {
+    const response = await sendToContentScript(tab.id, {
+      type: 'GET_SELECTION',
+    });
+    return (response?.text ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
+async function readClipboardText() {
+  try {
+    if (!navigator.clipboard?.readText) return '';
+    return (await navigator.clipboard.readText())?.trim() || '';
+  } catch {
+    // Permission denied or clipboard unavailable.
+    return '';
   }
 }
 
@@ -421,47 +485,6 @@ async function persistDraftNow() {
     draft.imageGroup
   ) {
     await setSaveDraft(draft);
-  }
-}
-
-async function tryLoadSelectionFromActiveTab() {
-  const [tab] = await browser.tabs.query({
-    active: true,
-    currentWindow: true,
-  });
-  if (!tab?.id || !tab.url) return;
-
-  if (
-    tab.url.startsWith('chrome://') ||
-    tab.url.startsWith('edge://') ||
-    tab.url.startsWith('about:') ||
-    tab.url.startsWith('moz-extension://') ||
-    tab.url.startsWith('chrome-extension://')
-  ) {
-    return;
-  }
-
-  try {
-    const response = await sendToContentScript(tab.id, {
-      type: 'GET_SELECTION',
-    });
-    contentEl.value = response?.text ?? '';
-  } catch {
-    contentEl.value = '';
-  }
-}
-
-/** When content is still empty after draft/selection load, fill from clipboard. */
-async function tryFillContentFromClipboard() {
-  if (contentEl.value.trim()) return;
-  try {
-    if (!navigator.clipboard?.readText) return;
-    const text = (await navigator.clipboard.readText())?.trim();
-    if (!text) return;
-    contentEl.value = text;
-    schedulePersistDraft();
-  } catch {
-    // Permission denied or clipboard unavailable — ignore silently.
   }
 }
 
