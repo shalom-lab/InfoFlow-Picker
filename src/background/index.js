@@ -207,15 +207,19 @@ async function assertGithubSettings() {
   return settings;
 }
 
+/** How long an "uploading" item may sit before we treat the SW as killed mid-flight. */
+const STUCK_UPLOADING_MS = 2 * 60 * 1000;
+
 async function processSyncQueue() {
   if (syncProcessing) return;
   syncProcessing = true;
 
   try {
-    // Reset stuck "uploading" after SW kill mid-flight.
+    // Only reclaim items left "uploading" after an MV3 SW kill — not mid-flight peers.
+    const now = Date.now();
     const queue = await getSyncQueue();
     for (const item of queue) {
-      if (item.status === 'uploading') {
+      if (item.status === 'uploading' && now - (item.updatedAt || 0) >= STUCK_UPLOADING_MS) {
         await updateSyncItem(item.id, { status: 'pending' });
       }
     }
@@ -229,13 +233,20 @@ async function processSyncQueue() {
       );
       if (!next) break;
 
+      const settings = await assertGithubSettings();
+      // Freeze target paths once so retries overwrite the same files instead of
+      // creating new timestamp/random filenames (which caused duplicate images).
+      const uploadPlan = next.payload.uploadPlan ?? buildUploadPlan(next.payload, settings);
+      const payload = { ...next.payload, uploadPlan };
+
       await updateSyncItem(next.id, {
         status: 'uploading',
         attempts: next.attempts + 1,
+        payload,
       });
 
       try {
-        await uploadSelectionToGitHub(next.payload);
+        await uploadSelectionToGitHub(payload, settings);
         await removeSyncItem(next.id);
       } catch (error) {
         const message = error?.message || String(error);
@@ -245,6 +256,7 @@ async function processSyncQueue() {
           status: 'failed',
           lastError: message,
           attempts,
+          payload,
         });
         await scheduleSyncAlarm(nextRetryDelayMinutes(attempts));
         // Stop this pass; alarm will retry so we don't tight-loop on bad network.
@@ -262,7 +274,56 @@ async function processSyncQueue() {
   }
 }
 
-async function uploadSelectionToGitHub(payload) {
+/**
+ * Stable paths for one sync job. Generated once and stored on the queue item so
+ * failed / SW-killed retries PUT to the same GitHub paths (no duplicate images).
+ */
+function buildUploadPlan(payload, settings) {
+  const category = payload?.category?.trim();
+  if (!category) {
+    throw new Error('Invalid payload: category is required');
+  }
+
+  const content = payload?.content?.trim() || '';
+  const image = payload?.image;
+  const images = Array.isArray(payload?.images) ? payload.images.filter(Boolean) : [];
+  const imagesToUpload = images.length > 0 ? images : image ? [image] : [];
+  if (!content && imagesToUpload.length === 0) {
+    throw new Error('Invalid payload: content or image is required');
+  }
+
+  const safeCategory = category.replace(/[\\/:*?"<>|]/g, '_');
+  const time = new Date().toISOString().replace(/[:.]/g, '-');
+  const randomSuffix = Math.random().toString(36).substring(2, 8);
+  const base = settings.github.basePath || 'infoflow-data';
+  const formats = settings.outputFormats || 'json+md';
+  const shouldUploadJson = formats === 'json+md' || formats === 'json';
+  const shouldUploadMd = formats === 'json+md' || formats === 'md';
+
+  const imagePaths = imagesToUpload.map(
+    (_, index) => `${base}/Images/${safeCategory}/${time}-${randomSuffix}-${index}.png`,
+  );
+
+  let jsonPath = null;
+  let mdPath = null;
+  if (content || imagePaths.length > 0) {
+    if (shouldUploadJson) {
+      jsonPath = `${base}/${safeCategory}/${time}-${randomSuffix}.json`;
+    }
+    if (shouldUploadMd) {
+      mdPath = `${base}/${safeCategory}/${time}-${randomSuffix}.md`;
+    }
+  }
+
+  return {
+    safeCategory,
+    imagePaths,
+    jsonPath,
+    mdPath,
+  };
+}
+
+async function uploadSelectionToGitHub(payload, settings) {
   const content = payload?.content?.trim() || '';
   const category = payload?.category?.trim();
   const url = payload?.url?.trim() || '';
@@ -282,108 +343,89 @@ async function uploadSelectionToGitHub(payload) {
     throw new Error('Invalid payload: content or image is required');
   }
 
-  const settings = await assertGithubSettings();
-  const safeCategory = category.replace(/[\\/:*?"<>|]/g, '_');
-  const time = new Date().toISOString().replace(/[:.]/g, '-');
-  const base = settings.github.basePath || 'infoflow-data';
-
-  let imagePath = null;
-  let imagePaths = [];
+  const resolvedSettings = settings ?? (await assertGithubSettings());
+  const plan = payload.uploadPlan ?? buildUploadPlan(payload, resolvedSettings);
+  const { safeCategory, imagePaths, jsonPath, mdPath } = plan;
+  const imagePath = imagePaths[primaryUploadIndex] ?? imagePaths[0] ?? null;
 
   if (imagesToUpload.length > 0) {
-    const extension = 'png';
-    const randomSuffix = Math.random().toString(36).substring(2, 8);
-
-    imagePaths = await Promise.all(
+    await Promise.all(
       imagesToUpload.map(async (img, index) => {
         const imageArrayBuffer = await resolveImageArrayBuffer(img);
-        const filePath = `${base}/Images/${safeCategory}/${time}-${randomSuffix}-${index}.${extension}`;
+        const filePath = imagePaths[index];
         await uploadToGitHub({
           filePath,
           content: imageArrayBuffer,
-          settings,
+          settings: resolvedSettings,
           isBinary: true,
         });
         return filePath;
       }),
     );
-
-    imagePath = imagePaths[primaryUploadIndex] ?? imagePaths[0] ?? null;
   }
 
-  const formats = settings.outputFormats || 'json+md';
-  const shouldUploadJson = formats === 'json+md' || formats === 'json';
-  const shouldUploadMd = formats === 'json+md' || formats === 'md';
+  const relativeImagePaths = toRelativeImagePaths(imagePaths, safeCategory);
+  const relativeImagePath = relativeImagePaths[primaryUploadIndex] ?? relativeImagePaths[0] ?? null;
+  const uploads = [];
 
   if (content) {
-    const uploads = [];
-    const relativeImagePaths = toRelativeImagePaths(imagePaths, safeCategory);
-    const relativeImagePath = relativeImagePaths[primaryUploadIndex] ?? relativeImagePaths[0] ?? null;
-
-    if (shouldUploadJson) {
-      const jsonPath = buildFilePath(settings, category, 'json');
-      const jsonContent = buildContent('json', {
-        category,
-        content,
-        url,
-        notes,
-        imagePath: relativeImagePath,
-        imagePaths: relativeImagePaths,
+    if (jsonPath) {
+      uploads.push({
+        filePath: jsonPath,
+        content: buildContent('json', {
+          category,
+          content,
+          url,
+          notes,
+          imagePath: relativeImagePath,
+          imagePaths: relativeImagePaths,
+        }),
       });
-      uploads.push({ filePath: jsonPath, content: jsonContent });
     }
-
-    if (shouldUploadMd) {
-      const mdPath = buildFilePath(settings, category, 'md');
-      const mdContent = buildContent('md', {
-        category,
-        content,
-        url,
-        notes,
-        imagePath: relativeImagePath,
-        imagePaths: relativeImagePaths,
+    if (mdPath) {
+      uploads.push({
+        filePath: mdPath,
+        content: buildContent('md', {
+          category,
+          content,
+          url,
+          notes,
+          imagePath: relativeImagePath,
+          imagePaths: relativeImagePaths,
+        }),
       });
-      uploads.push({ filePath: mdPath, content: mdContent });
     }
-
-    await Promise.all(
-      uploads.map(({ filePath, content: fileContent }) =>
-        uploadToGitHub({ filePath, content: fileContent, settings }),
-      ),
-    );
   } else if (imagePath) {
-    const relativeImagePaths = toRelativeImagePaths(imagePaths, safeCategory);
-    const relativeImagePath = relativeImagePaths[primaryUploadIndex] ?? relativeImagePaths[0] ?? null;
-    const uploads = [];
-    const randomSuffix = Math.random().toString(36).substring(2, 8);
-
-    if (shouldUploadJson) {
-      const jsonPath = `${base}/${safeCategory}/${time}-${randomSuffix}.json`;
-      const jsonContent = buildImageOnlyContent('json', {
-        category,
-        imagePath: relativeImagePath,
-        imagePaths: relativeImagePaths,
-        url,
-        notes,
+    if (jsonPath) {
+      uploads.push({
+        filePath: jsonPath,
+        content: buildImageOnlyContent('json', {
+          category,
+          imagePath: relativeImagePath,
+          imagePaths: relativeImagePaths,
+          url,
+          notes,
+        }),
       });
-      uploads.push({ filePath: jsonPath, content: jsonContent });
     }
-
-    if (shouldUploadMd) {
-      const mdPath = `${base}/${safeCategory}/${time}-${randomSuffix}.md`;
-      const mdContent = buildImageOnlyMarkdown({
-        category,
-        imagePath: relativeImagePath,
-        imagePaths: relativeImagePaths,
-        url,
-        notes,
+    if (mdPath) {
+      uploads.push({
+        filePath: mdPath,
+        content: buildImageOnlyMarkdown({
+          category,
+          imagePath: relativeImagePath,
+          imagePaths: relativeImagePaths,
+          url,
+          notes,
+        }),
       });
-      uploads.push({ filePath: mdPath, content: mdContent });
     }
+  }
 
+  if (uploads.length > 0) {
     await Promise.all(
       uploads.map(({ filePath, content: fileContent }) =>
-        uploadToGitHub({ filePath, content: fileContent, settings }),
+        uploadToGitHub({ filePath, content: fileContent, settings: resolvedSettings }),
       ),
     );
   }
@@ -469,22 +511,6 @@ function buildImageOnlyContent(format, { category, imagePath, imagePaths = [], u
   }
   
   return buildImageOnlyMarkdown({ category, imagePath, imagePaths: allPaths, url, notes });
-}
-
-function buildFilePath(settings, category, format) {
-  const safeCategory = category.replace(/[\\/:*?"<>|]/g, '_');
-  const time = new Date().toISOString().replace(/[:.]/g, '-');
-  // 添加随机后缀确保文件名唯一，避免并发冲突
-  const randomSuffix = Math.random().toString(36).substring(2, 8);
-  const base = settings.github.basePath || 'infoflow-data';
-  const extension = getExtensionForFormat(format);
-  return `${base}/${safeCategory}/${time}-${randomSuffix}.${extension}`;
-}
-
-function getExtensionForFormat(format) {
-  if (format === 'json') return 'json';
-  if (format === 'csv') return 'csv';
-  return 'md';
 }
 
 async function uploadToGitHub({ filePath, content, settings, isBinary = false, retryCount = 0 }) {
