@@ -7,7 +7,14 @@ import {
   mergePendingIntoDraft,
   setSaveDraft,
   clearPendingCapture,
+  normalizeDraftImageList,
+  applyMergedImagesToDraft,
 } from '../utils/draft.js';
+import {
+  createDraftImageId,
+  hydrateDraftImageSlots,
+  syncPickedImagesToIdb,
+} from '../utils/draftImages.js';
 import { t } from '../i18n/index.js';
 import { sendToContentScript } from '../utils/injectContent.js';
 
@@ -20,6 +27,7 @@ const statusEl = document.getElementById('status');
 const optionsBtn = document.getElementById('options-btn');
 const imageInput = document.getElementById('image-input');
 const imageSelectBtn = document.getElementById('image-select-btn');
+const imagePasteBtn = document.getElementById('image-paste-btn');
 const imagePreviewContainer = document.getElementById('image-preview-container');
 const imagePreview = document.getElementById('image-preview');
 const imageRemoveBtn = document.getElementById('image-remove-btn');
@@ -28,6 +36,12 @@ const imageGroupHint = document.getElementById('image-group-hint');
 const imageGroupGrid = document.getElementById('image-group-grid');
 const imageGroupSelectAllBtn = document.getElementById('image-group-select-all');
 const imageGroupSelectCurrentBtn = document.getElementById('image-group-select-current');
+const imageLightbox = document.getElementById('image-lightbox');
+const imageLightboxImg = document.getElementById('image-lightbox-img');
+const imageLightboxClose = document.getElementById('image-lightbox-close');
+const imageLightboxPrev = document.getElementById('image-lightbox-prev');
+const imageLightboxNext = document.getElementById('image-lightbox-next');
+const imageLightboxCounter = document.getElementById('image-lightbox-counter');
 const retrySyncBtn = document.getElementById('retry-sync-btn');
 const syncQueuePanel = document.getElementById('sync-queue-panel');
 const syncQueueToggle = document.getElementById('sync-queue-toggle');
@@ -57,11 +71,20 @@ let statusState = { key: 'statusIdle', tone: 'muted' };
 let settingsStatusState = { key: '', tone: 'info' };
 let currentImageFile = null; // 存储图片文件对象或URL
 let currentImageUrl = null; // 存储图片URL（用于预览）
-/** @type {{ images: Array<{url: string, base64?: string, type?: string}>, clickedIndex: number, selected: Set<number> } | null} */
+/** @type {{ images: Array<{url: string, base64?: string, type?: string, arrayBuffer?: number[]}>, clickedIndex: number, selected: Set<number> } | null} */
 let imageGroupState = null;
 let persistDraftTimer = null;
 let syncQueueExpanded = false;
 let lastSyncSummary = null;
+/** @type {string[]} */
+let lightboxSources = [];
+let lightboxIndex = 0;
+/** @type {string[]} */
+let syncQueueObjectUrls = [];
+/** @type {Map<string, string[]>} */
+let syncQueuePreviewMap = new Map();
+/** Serialize select/paste append so concurrent pastes cannot drop earlier images. */
+let imageAppendChain = Promise.resolve();
 
 init();
 
@@ -84,10 +107,28 @@ async function init() {
   syncQueueToggle?.addEventListener('click', handleSyncQueueToggle);
   syncQueueList?.addEventListener('click', handleSyncQueueListClick);
   imageSelectBtn.addEventListener('click', () => imageInput.click());
+  imagePasteBtn?.addEventListener('click', handlePasteImageClick);
   imageInput.addEventListener('change', handleImageSelect);
   imageRemoveBtn.addEventListener('click', handleImageRemove);
+  imagePreview?.addEventListener('click', () => {
+    if (currentImageUrl) openLightbox([currentImageUrl], 0);
+  });
   imageGroupSelectAllBtn.addEventListener('click', handleImageGroupSelectAll);
   imageGroupSelectCurrentBtn.addEventListener('click', handleImageGroupSelectCurrentOnly);
+  imageLightboxClose?.addEventListener('click', closeLightbox);
+  imageLightboxPrev?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    stepLightbox(-1);
+  });
+  imageLightboxNext?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    stepLightbox(1);
+  });
+  imageLightbox?.addEventListener('click', (event) => {
+    if (event.target === imageLightbox) closeLightbox();
+  });
+  document.addEventListener('paste', handleDocumentPaste);
+  document.addEventListener('keydown', handleLightboxKeydown);
   contentEl.addEventListener('input', schedulePersistDraft);
   notesEl.addEventListener('input', schedulePersistDraft);
   sourceUrlEl.addEventListener('input', schedulePersistDraft);
@@ -139,9 +180,16 @@ function applyTranslations() {
     'imageLabel',
   );
   imageSelectBtn.textContent = t(currentLanguage, 'selectImageButton');
+  if (imagePasteBtn) {
+    imagePasteBtn.textContent = t(currentLanguage, 'pasteImageButton');
+  }
   imageRemoveBtn.textContent = t(currentLanguage, 'removeImageButton');
   imageGroupSelectAllBtn.textContent = t(currentLanguage, 'imageGroupSelectAll');
   imageGroupSelectCurrentBtn.textContent = t(currentLanguage, 'imageGroupSelectCurrentOnly');
+  if (imageLightboxClose) {
+    imageLightboxClose.setAttribute('aria-label', t(currentLanguage, 'imageLightboxClose'));
+    imageLightboxClose.title = t(currentLanguage, 'imageLightboxClose');
+  }
   if (imageGroupState) {
     updateImageGroupHint();
   }
@@ -236,6 +284,7 @@ function clearImageState() {
   imagePreviewContainer.style.display = 'none';
   imageGroupPanel.style.display = 'none';
   imageGroupGrid.innerHTML = '';
+  if (imageRemoveBtn) imageRemoveBtn.style.display = 'none';
   imageInput.value = '';
 }
 
@@ -257,9 +306,14 @@ async function loadSavedFormState() {
       },
       existingDraft,
     );
+    if (Array.isArray(draft.__mergedImagesForSync)) {
+      await syncPickedImagesToIdb(draft.__mergedImagesForSync);
+      delete draft.__mergedImagesForSync;
+    }
     await clearPendingCapture();
     await setSaveDraft(draft);
     applyDraftToForm(draft);
+    await applyDraftImages(draft);
     // Image-only capture: still fill empty content from selection/clipboard.
     if (!String(draft.content || '').trim()) {
       await preferFreshContentText({ overrideDraft: true });
@@ -271,6 +325,7 @@ async function loadSavedFormState() {
   // Restore notes / category / images / previous fields first…
   if (existingDraft) {
     applyDraftToForm(existingDraft);
+    await applyDraftImages(existingDraft);
   }
 
   // …then prefer the latest page selection or clipboard over stale draft text.
@@ -351,53 +406,47 @@ function applyDraftToForm(draft) {
   }
 
   clearImageState();
+  // Image restore is async (IndexedDB); caller awaits applyDraftImages(draft).
+}
 
-  if (!draft.imageUrl && !draft.imageData) {
-    return;
-  }
+async function applyDraftImages(draft) {
+  const slots = normalizeDraftImageList(draft);
+  if (!slots.length) return;
 
-  const group = draft.imageGroup;
-  const clickedIndex = group?.clickedIndex ?? 0;
-  const groupImages = group?.images?.length > 1 ? group.images : null;
+  const images = await hydrateDraftImageSlots(slots);
+  if (!images.length) return;
+
   const selectedIndices = Array.isArray(draft.imageGroupSelected) && draft.imageGroupSelected.length
-    ? draft.imageGroupSelected
-    : (groupImages ? groupImages.map((_, index) => index) : [clickedIndex]);
+    ? draft.imageGroupSelected.filter((index) => index >= 0 && index < images.length)
+    : images.map((_, index) => index);
+  const clickedIndex = Number.isInteger(draft.clickedImageIndex)
+    ? Math.min(Math.max(draft.clickedImageIndex, 0), images.length - 1)
+    : (draft.imageGroup?.clickedIndex ?? 0);
 
-  if (groupImages) {
-    const images = groupImages.map((item, index) => {
-      const entry = { url: item.url, index };
-      if (index === clickedIndex && draft.imageData?.base64) {
-        entry.base64 = draft.imageData.base64;
-        entry.type = draft.imageData.type || 'image/png';
-      }
-      return entry;
-    });
+  if (images.length === 1) {
+    const only = images[0];
     imageGroupState = {
-      images,
-      clickedIndex,
-      selected: new Set(selectedIndices),
+      images: [{ ...only, index: 0 }],
+      clickedIndex: 0,
+      selected: new Set([0]),
     };
-    renderImageGroup();
-    syncCurrentImageFromGroup();
-    return;
-  }
-
-  if (draft.imageData?.base64) {
-    const mimeType = draft.imageData.type || 'image/png';
-    currentImageUrl = `data:${mimeType};base64,${draft.imageData.base64}`;
-    currentImageFile = {
-      base64: draft.imageData.base64,
-      type: mimeType,
-    };
+    currentImageFile = only.base64
+      ? { base64: only.base64, type: only.type || 'image/png', id: only.id }
+      : only.url;
+    currentImageUrl = only.base64
+      ? `data:${only.type || 'image/png'};base64,${only.base64}`
+      : only.url;
     showSingleImagePreview(currentImageUrl);
     return;
   }
 
-  if (draft.imageUrl) {
-    currentImageUrl = draft.imageUrl;
-    currentImageFile = draft.imageUrl;
-    showSingleImagePreview(currentImageUrl);
-  }
+  imageGroupState = {
+    images: images.map((item, index) => ({ ...item, index })),
+    clickedIndex: Math.min(Math.max(clickedIndex, 0), images.length - 1),
+    selected: new Set(selectedIndices.length ? selectedIndices : images.map((_, index) => index)),
+  };
+  renderImageGroup();
+  syncCurrentImageFromGroup();
 }
 
 function collectDraftFromForm() {
@@ -408,46 +457,36 @@ function collectDraftFromForm() {
     category: categoryEl.value,
     imageUrl: null,
     imageData: null,
+    imageId: null,
+    imageItems: null,
     imageGroup: null,
     imageGroupSelected: null,
+    clickedImageIndex: 0,
   };
 
-  if (imageGroupState) {
-    draft.imageGroup = {
-      clickedIndex: imageGroupState.clickedIndex,
-      images: imageGroupState.images.map(({ url, index }) => ({ url, index })),
-    };
-    draft.imageGroupSelected = [...imageGroupState.selected].sort((a, b) => a - b);
-    const primaryIndex = imageGroupState.selected.has(imageGroupState.clickedIndex)
-      ? imageGroupState.clickedIndex
-      : draft.imageGroupSelected[0];
-    const primary = imageGroupState.images[primaryIndex];
-    if (primary) {
-      draft.imageUrl = primary.url;
-      if (primary.base64) {
-        draft.imageData = {
-          base64: primary.base64,
-          type: primary.type || 'image/png',
-        };
-      }
-    }
+  const images = getCurrentPickedImages();
+  if (!images.length) {
     return draft;
   }
 
-  if (currentImageFile?.base64) {
-    draft.imageUrl = currentImageUrl?.startsWith('data:') ? '' : (currentImageUrl ?? '');
-    draft.imageData = {
-      base64: currentImageFile.base64,
-      type: currentImageFile.type || 'image/png',
-    };
-    return draft;
-  }
+  const clickedIndex = imageGroupState
+    ? imageGroupState.clickedIndex
+    : 0;
+  const selected = imageGroupState
+    ? [...imageGroupState.selected].sort((a, b) => a - b)
+    : images.map((_, index) => index);
 
-  if (typeof currentImageFile === 'string') {
-    draft.imageUrl = currentImageFile;
-  }
-
+  applyMergedImagesToDraft(draft, images, clickedIndex);
+  draft.imageGroupSelected = selected;
   return draft;
+}
+
+function getCurrentPickedImages() {
+  if (imageGroupState?.images?.length) {
+    return imageGroupState.images.map((item, index) => ({ ...item, index }));
+  }
+  const single = snapshotCurrentAsGroupItem();
+  return single ? [single] : [];
 }
 
 function schedulePersistDraft() {
@@ -456,16 +495,10 @@ function schedulePersistDraft() {
   }
   persistDraftTimer = setTimeout(async () => {
     persistDraftTimer = null;
-    const draft = collectDraftFromForm();
-    if (
-      draft.content ||
-      draft.notes ||
-      draft.url ||
-      draft.imageUrl ||
-      draft.imageData ||
-      draft.imageGroup
-    ) {
-      await setSaveDraft(draft);
+    try {
+      await persistDraftNow();
+    } catch (error) {
+      console.error('Failed to persist draft:', error);
     }
   }, 300);
 }
@@ -476,21 +509,22 @@ async function persistDraftNow() {
     persistDraftTimer = null;
   }
   const draft = collectDraftFromForm();
+  const images = getCurrentPickedImages();
   if (
     draft.content ||
     draft.notes ||
     draft.url ||
-    draft.imageUrl ||
-    draft.imageData ||
-    draft.imageGroup
+    images.length
   ) {
+    // Binary images live in IndexedDB; chrome.storage only keeps lightweight refs.
+    await syncPickedImagesToIdb(images);
     await setSaveDraft(draft);
   }
 }
 
 function showSingleImagePreview(src) {
   imageGroupPanel.style.display = 'none';
-  imageGroupState = null;
+  // Keep imageGroupState when present — clearing it caused paste #3 to drop paste #1.
   let previewErrorHandled = false;
   imagePreview.onerror = () => {
     if (!previewErrorHandled) {
@@ -501,12 +535,14 @@ function showSingleImagePreview(src) {
   imagePreview.onload = () => {};
   imagePreview.src = src;
   imagePreviewContainer.style.display = 'block';
+  if (imageRemoveBtn) imageRemoveBtn.style.display = 'flex';
 }
 
 function renderImageGroup() {
   if (!imageGroupState) return;
   imagePreviewContainer.style.display = 'none';
   imageGroupPanel.style.display = 'block';
+  if (imageRemoveBtn) imageRemoveBtn.style.display = 'flex';
   imageGroupGrid.innerHTML = '';
 
   imageGroupState.images.forEach((item, index) => {
@@ -538,11 +574,31 @@ function renderImageGroup() {
     tag.textContent = t(currentLanguage, 'imageGroupPrimaryBadge');
 
     cell.append(img, check, tag);
-    cell.addEventListener('click', () => toggleImageGroupSelection(index));
+    cell.addEventListener('click', (event) => {
+      if (event.detail === 2) {
+        openLightbox(getPreviewSourcesFromGroup(), index);
+        return;
+      }
+      toggleImageGroupSelection(index);
+    });
+    cell.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      openLightbox(getPreviewSourcesFromGroup(), index);
+    });
     imageGroupGrid.appendChild(cell);
   });
 
   updateImageGroupHint();
+}
+
+function getPreviewSourcesFromGroup() {
+  if (!imageGroupState) return [];
+  return imageGroupState.images.map((item) => {
+    if (item.base64) {
+      return `data:${item.type || 'image/png'};base64,${item.base64}`;
+    }
+    return item.url;
+  }).filter(Boolean);
 }
 
 function updateImageGroupHint() {
@@ -597,7 +653,12 @@ function syncCurrentImageFromGroup() {
     : [...imageGroupState.selected].sort((a, b) => a - b)[0];
   const item = imageGroupState.images[primaryIndex];
   if (item.base64) {
-    currentImageFile = { base64: item.base64, type: item.type || 'image/png' };
+    currentImageFile = {
+      id: item.id,
+      base64: item.base64,
+      type: item.type || 'image/png',
+      arrayBuffer: item.arrayBuffer,
+    };
     currentImageUrl = `data:${item.type || 'image/png'};base64,${item.base64}`;
   } else {
     currentImageFile = item.url;
@@ -656,90 +717,354 @@ function getImagesPayloadForSave() {
 }
 
 function handleImageSelect(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  
-  imageGroupState = null;
-  imageGroupPanel.style.display = 'none';
-  
-  if (!file.type.startsWith('image/')) {
+  const files = [...(event.target.files || [])].filter((file) =>
+    file.type.startsWith('image/'),
+  );
+  imageInput.value = '';
+  if (!files.length) {
     setStatus('invalidImage', 'error');
     return;
   }
-  
-  // 读取文件并转换为PNG格式
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const img = new Image();
-    img.onload = () => {
-      // 使用Canvas转换为PNG
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      
-      // 转换为PNG格式的blob
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          setStatus('invalidImage', 'error');
-          return;
-        }
-        
-        // 调试：检查blob大小
-        console.log('PNG blob size:', blob.size, 'Canvas size:', canvas.width, 'x', canvas.height);
-        if (blob.size === 0) {
-          setStatus('invalidImage', 'error');
-          console.error('Blob is empty after canvas conversion');
-          return;
-        }
-        
-        // 直接将blob转换为ArrayBuffer并存储，避免File对象可能的问题
-        blob.arrayBuffer().then((arrayBuffer) => {
-          console.log('Blob ArrayBuffer size:', arrayBuffer.byteLength);
-          if (arrayBuffer.byteLength === 0) {
-            setStatus('invalidImage', 'error');
-            console.error('ArrayBuffer is empty');
-            return;
-          }
-          
-          // 存储ArrayBuffer（转换为数组以便后续序列化）
-          const uint8Array = new Uint8Array(arrayBuffer);
-          currentImageFile = {
-            arrayBuffer: Array.from(uint8Array),
-            type: 'image/png',
-            size: blob.size,
-          };
-          console.log('Stored array length:', currentImageFile.arrayBuffer.length);
-          
-          // 显示预览
-          currentImageUrl = URL.createObjectURL(blob);
-          // 重置错误处理（blob URL 通常不会有 CORS 问题，但为了安全起见）
-          imagePreview.onerror = null;
-          imagePreview.onload = null;
-          imagePreview.src = currentImageUrl;
-          imagePreviewContainer.style.display = 'block';
-          schedulePersistDraft();
-        }).catch((error) => {
-          console.error('Failed to process blob:', error);
-          setStatus('invalidImage', 'error');
-        });
-      }, 'image/png');
-    };
-    img.onerror = () => {
-      setStatus('invalidImage', 'error');
-    };
-    img.src = e.target.result;
-  };
-  reader.onerror = () => {
+
+  // Append to remembered images (select / paste / right-click share one list).
+  appendImagesFromBlobs(files, { announce: false }).catch((error) => {
+    console.error('Failed to process selected images:', error);
     setStatus('invalidImage', 'error');
-  };
-  reader.readAsDataURL(file);
+  });
 }
 
 function handleImageRemove() {
   clearImageState();
   persistDraftNow();
+}
+
+/**
+ * Convert an image Blob/File to a PNG item used by the picker UI / save payload.
+ * @param {Blob} blob
+ * @returns {Promise<{url: string, base64: string, type: string, arrayBuffer: number[]}>}
+ */
+function processBlobToPngItem(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        if (!canvas.width || !canvas.height) {
+          reject(new Error('Invalid image dimensions'));
+          return;
+        }
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob(async (pngBlob) => {
+          try {
+            if (!pngBlob || pngBlob.size === 0) {
+              reject(new Error('Empty PNG blob'));
+              return;
+            }
+            const arrayBuffer = await pngBlob.arrayBuffer();
+            if (!arrayBuffer.byteLength) {
+              reject(new Error('Empty ArrayBuffer'));
+              return;
+            }
+            const uint8Array = new Uint8Array(arrayBuffer);
+            const base64 = uint8ToBase64(uint8Array);
+            resolve({
+              url: `data:image/png;base64,${base64}`,
+              base64,
+              type: 'image/png',
+              arrayBuffer: Array.from(uint8Array),
+            });
+          } catch (error) {
+            reject(error);
+          }
+        }, 'image/png');
+      };
+      img.onerror = () => reject(new Error('Image decode failed'));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error('FileReader failed'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function uint8ToBase64(uint8Array) {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < uint8Array.length; i += chunk) {
+    binary += String.fromCharCode(...uint8Array.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function snapshotCurrentAsGroupItem() {
+  if (imageGroupState?.images?.length) return null;
+  if (!currentImageFile) return null;
+  if (typeof currentImageFile === 'string') {
+    return { id: createDraftImageId(), url: currentImageFile, index: 0 };
+  }
+  if (currentImageFile.base64) {
+    return {
+      id: currentImageFile.id || createDraftImageId(),
+      url: currentImageUrl || `data:${currentImageFile.type || 'image/png'};base64,${currentImageFile.base64}`,
+      base64: currentImageFile.base64,
+      type: currentImageFile.type || 'image/png',
+      arrayBuffer: currentImageFile.arrayBuffer,
+      index: 0,
+    };
+  }
+  if (currentImageFile.arrayBuffer) {
+    const arr = Array.isArray(currentImageFile.arrayBuffer)
+      ? currentImageFile.arrayBuffer
+      : Array.from(new Uint8Array(currentImageFile.arrayBuffer));
+    const base64 = uint8ToBase64(new Uint8Array(arr));
+    return {
+      id: currentImageFile.id || createDraftImageId(),
+      url: currentImageUrl || `data:image/png;base64,${base64}`,
+      base64,
+      type: currentImageFile.type || 'image/png',
+      arrayBuffer: arr,
+      index: 0,
+    };
+  }
+  return null;
+}
+
+function applyLocalImageItems(items, { append = true } = {}) {
+  if (!items.length) return;
+
+  const stamped = items.map((item) => ({
+    ...item,
+    id: item.id || createDraftImageId(),
+  }));
+
+  let nextImages = [];
+  let clickedIndex = 0;
+
+  if (append) {
+    const existing = imageGroupState?.images?.length
+      ? imageGroupState.images.map((item, index) => ({ ...item, index }))
+      : (() => {
+          const single = snapshotCurrentAsGroupItem();
+          return single ? [single] : [];
+        })();
+    clickedIndex = existing.length;
+    nextImages = [
+      ...existing,
+      ...stamped.map((item, offset) => ({ ...item, index: existing.length + offset })),
+    ];
+  } else {
+    nextImages = stamped.map((item, index) => ({ ...item, index }));
+    clickedIndex = 0;
+  }
+
+  if (currentImageUrl && currentImageUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(currentImageUrl);
+  }
+
+  // Always keep imageGroupState so later pastes append to the full remembered list.
+  imageGroupState = {
+    images: nextImages.map((item, index) => ({
+      ...item,
+      index,
+      id: item.id || createDraftImageId(),
+      url: item.url
+        || (item.base64 ? `data:${item.type || 'image/png'};base64,${item.base64}` : ''),
+    })),
+    clickedIndex,
+    selected: new Set(nextImages.map((_, index) => index)),
+  };
+
+  if (nextImages.length === 1) {
+    const only = imageGroupState.images[0];
+    currentImageFile = {
+      id: only.id,
+      base64: only.base64,
+      type: only.type || 'image/png',
+      arrayBuffer: only.arrayBuffer,
+    };
+    currentImageUrl = only.url
+      || (only.base64 ? `data:${only.type || 'image/png'};base64,${only.base64}` : '');
+    showSingleImagePreview(currentImageUrl);
+    return;
+  }
+
+  renderImageGroup();
+  syncCurrentImageFromGroup();
+}
+
+async function appendImagesFromBlobs(blobs, { announce = true } = {}) {
+  const run = async () => {
+    const items = [];
+    for (const blob of blobs) {
+      items.push(await processBlobToPngItem(blob));
+    }
+    applyLocalImageItems(items, { append: true });
+    await persistDraftNow();
+    if (announce) {
+      const total = getCurrentPickedImages().length;
+      setStatus('clipboardPasteSuccess', 'success', { n: items.length, total });
+    }
+  };
+
+  const next = imageAppendChain.then(run, run);
+  imageAppendChain = next.catch((error) => {
+    console.error('Image append failed:', error);
+  });
+  try {
+    await next;
+  } catch (error) {
+    setStatus('draftPersistFailed', 'error');
+    throw error;
+  }
+}
+
+function extractImageBlobsFromClipboardEvent(event) {
+  const blobs = [];
+  const files = event.clipboardData?.files;
+  if (files?.length) {
+    for (const file of files) {
+      if (file.type.startsWith('image/')) blobs.push(file);
+    }
+  }
+  if (!blobs.length && event.clipboardData?.items) {
+    for (const item of event.clipboardData.items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) blobs.push(file);
+      }
+    }
+  }
+  return blobs;
+}
+
+async function readClipboardImageBlobs() {
+  if (!navigator.clipboard?.read) {
+    return [];
+  }
+  const clipboardItems = await navigator.clipboard.read();
+  const blobs = [];
+  for (const item of clipboardItems) {
+    const imageType = item.types.find((type) => type.startsWith('image/'));
+    if (!imageType) continue;
+    blobs.push(await item.getType(imageType));
+  }
+  return blobs;
+}
+
+async function handlePasteImageClick() {
+  try {
+    const blobs = await readClipboardImageBlobs();
+    if (!blobs.length) {
+      setStatus('clipboardNoImage', 'error');
+      return;
+    }
+    await appendImagesFromBlobs(blobs);
+  } catch (error) {
+    console.error('Clipboard image paste failed:', error);
+    setStatus('clipboardPasteFailed', 'error');
+  }
+}
+
+async function handleDocumentPaste(event) {
+  const blobs = extractImageBlobsFromClipboardEvent(event);
+  if (!blobs.length) return;
+  event.preventDefault();
+  try {
+    await appendImagesFromBlobs(blobs);
+  } catch (error) {
+    console.error('Paste event image handling failed:', error);
+    setStatus('invalidImage', 'error');
+  }
+}
+
+function openLightbox(sources, startIndex = 0) {
+  const list = (sources || []).filter(Boolean);
+  if (!list.length || !imageLightbox || !imageLightboxImg) return;
+  lightboxSources = list;
+  lightboxIndex = Math.min(Math.max(startIndex, 0), list.length - 1);
+  imageLightbox.classList.add('open');
+  imageLightbox.setAttribute('aria-hidden', 'false');
+  renderLightbox();
+}
+
+function closeLightbox() {
+  if (!imageLightbox) return;
+  imageLightbox.classList.remove('open');
+  imageLightbox.setAttribute('aria-hidden', 'true');
+  lightboxSources = [];
+  lightboxIndex = 0;
+  if (imageLightboxImg) imageLightboxImg.src = '';
+}
+
+function stepLightbox(delta) {
+  if (lightboxSources.length <= 1) return;
+  lightboxIndex = (lightboxIndex + delta + lightboxSources.length) % lightboxSources.length;
+  renderLightbox();
+}
+
+function renderLightbox() {
+  if (!imageLightboxImg) return;
+  imageLightboxImg.src = lightboxSources[lightboxIndex] || '';
+  const multi = lightboxSources.length > 1;
+  if (imageLightboxPrev) imageLightboxPrev.style.display = multi ? 'block' : 'none';
+  if (imageLightboxNext) imageLightboxNext.style.display = multi ? 'block' : 'none';
+  if (imageLightboxCounter) {
+    imageLightboxCounter.style.display = multi ? 'block' : 'none';
+    imageLightboxCounter.textContent = multi
+      ? `${lightboxIndex + 1} / ${lightboxSources.length}`
+      : '';
+  }
+}
+
+function handleLightboxKeydown(event) {
+  if (!imageLightbox?.classList.contains('open')) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeLightbox();
+  } else if (event.key === 'ArrowLeft') {
+    event.preventDefault();
+    stepLightbox(-1);
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault();
+    stepLightbox(1);
+  }
+}
+
+function revokeSyncQueueObjectUrls() {
+  for (const url of syncQueueObjectUrls) {
+    URL.revokeObjectURL(url);
+  }
+  syncQueueObjectUrls = [];
+  syncQueuePreviewMap.clear();
+}
+
+function imagePayloadToPreviewSrc(image) {
+  if (!image) return null;
+  if (image.url && (image.url.startsWith('http') || image.url.startsWith('data:'))) {
+    return image.url;
+  }
+  if (image.arrayBuffer) {
+    const bytes = Array.isArray(image.arrayBuffer)
+      ? new Uint8Array(image.arrayBuffer)
+      : new Uint8Array(image.arrayBuffer);
+    return `data:${image.type || 'image/png'};base64,${uint8ToBase64(bytes)}`;
+  }
+  if (image.base64) {
+    return `data:${image.type || 'image/png'};base64,${image.base64}`;
+  }
+  return null;
+}
+
+function getQueueItemImageSources(payload) {
+  const images = Array.isArray(payload?.images) && payload.images.length
+    ? payload.images
+    : payload?.image
+      ? [payload.image]
+      : [];
+  return images.map(imagePayloadToPreviewSrc).filter(Boolean);
 }
 
 async function loadSourceUrl() {
@@ -881,6 +1206,8 @@ function updateSyncQueueToggleLabel() {
 function renderSyncQueue(summary) {
   if (!syncQueuePanel || !syncQueueList || !syncQueueToggle) return;
 
+  revokeSyncQueueObjectUrls();
+
   if (!summary || summary.total === 0) {
     syncQueuePanel.classList.remove('visible');
     syncQueueList.classList.remove('expanded');
@@ -906,6 +1233,35 @@ function renderSyncQueue(summary) {
     row.setAttribute('role', 'listitem');
     row.dataset.id = item.id;
 
+    const imageSources = getQueueItemImageSources(item.payload);
+    syncQueuePreviewMap.set(item.id, imageSources);
+    const thumbs = document.createElement('div');
+    thumbs.className = 'sync-queue-thumbs';
+    if (imageSources.length) {
+      const visible = imageSources.slice(0, 2);
+      visible.forEach((src, index) => {
+        const thumb = document.createElement('img');
+        thumb.className = 'sync-queue-thumb';
+        thumb.src = src;
+        thumb.alt = '';
+        thumb.dataset.action = 'preview';
+        thumb.dataset.id = item.id;
+        thumb.dataset.index = String(index);
+        thumbs.appendChild(thumb);
+      });
+      if (imageSources.length > 2) {
+        const more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'sync-queue-thumb-more';
+        more.dataset.action = 'preview';
+        more.dataset.id = item.id;
+        more.dataset.index = '0';
+        more.textContent = `+${imageSources.length - 2}`;
+        more.title = tFmt('syncQueueImagesCount', { n: imageSources.length });
+        thumbs.appendChild(more);
+      }
+    }
+
     const meta = document.createElement('div');
     meta.className = 'sync-queue-item-meta';
 
@@ -919,7 +1275,9 @@ function renderSyncQueue(summary) {
     const raw = (item.payload?.content || '').trim().replace(/\s+/g, ' ');
     preview.textContent = raw
       ? (raw.length > 48 ? `${raw.slice(0, 48)}…` : raw)
-      : t(currentLanguage, 'syncQueueEmptyPreview');
+      : (imageSources.length
+        ? tFmt('syncQueueImagesCount', { n: imageSources.length })
+        : t(currentLanguage, 'syncQueueEmptyPreview'));
     preview.title = raw || preview.textContent;
 
     meta.append(badge, preview);
@@ -939,7 +1297,12 @@ function renderSyncQueue(summary) {
     cancelBtn.dataset.id = item.id;
     cancelBtn.textContent = t(currentLanguage, 'syncQueueCancel');
 
-    row.append(meta, cancelBtn);
+    if (imageSources.length) {
+      row.append(thumbs, meta, cancelBtn);
+    } else {
+      row.style.gridTemplateColumns = '1fr auto';
+      row.append(meta, cancelBtn);
+    }
 
     if (item.lastError) {
       const err = document.createElement('div');
@@ -962,6 +1325,16 @@ function handleSyncQueueToggle() {
 }
 
 async function handleSyncQueueListClick(event) {
+  const previewEl = event.target.closest('[data-action="preview"]');
+  if (previewEl?.dataset.id) {
+    const sources = syncQueuePreviewMap.get(previewEl.dataset.id) || [];
+    if (sources.length) {
+      const startIndex = Number(previewEl.dataset.index || 0);
+      openLightbox(sources, Number.isFinite(startIndex) ? startIndex : 0);
+    }
+    return;
+  }
+
   const btn = event.target.closest('[data-action="cancel"]');
   if (!btn?.dataset.id) return;
   btn.disabled = true;

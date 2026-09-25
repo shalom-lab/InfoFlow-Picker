@@ -173,7 +173,7 @@
       .sync-queue-list {
         display: none;
         margin-top: 6px;
-        max-height: 132px;
+        max-height: 220px;
         overflow-y: auto;
         border: 1px solid #e2e8f0;
         border-radius: 10px;
@@ -184,15 +184,55 @@
       }
       .sync-queue-item {
         display: grid;
-        grid-template-columns: 1fr auto;
+        grid-template-columns: auto 1fr auto;
         gap: 4px 8px;
         padding: 6px 8px;
         border-bottom: 1px solid #e2e8f0;
         font-size: 11px;
         line-height: 1.35;
+        align-items: start;
       }
       .sync-queue-item:last-child {
         border-bottom: none;
+      }
+      .sync-queue-thumbs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        max-width: 72px;
+      }
+      .sync-queue-thumb {
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        border: 1px solid #cbd5e1;
+        object-fit: cover;
+        background: #e2e8f0;
+        cursor: zoom-in;
+        padding: 0;
+        display: block;
+      }
+      .sync-queue-thumb-more {
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        border: 1px dashed #94a3b8;
+        background: #f1f5f9;
+        color: #64748b;
+        font-size: 10px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: zoom-in;
+        padding: 0;
+        box-shadow: none;
+        margin: 0;
+      }
+      .sync-queue-thumb-more:hover:not(:disabled) {
+        background: #e2e8f0;
+        transform: none;
+        box-shadow: none;
       }
       .sync-queue-item-meta {
         display: flex;
@@ -237,6 +277,135 @@
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         word-break: break-word;
+      }
+      .image-actions {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 8px;
+      }
+      .image-actions > button {
+        flex: 1;
+        width: auto;
+        margin-top: 0;
+        margin-bottom: 0;
+        min-height: 34px;
+        padding: 6px 8px;
+        font-size: 11px;
+        font-weight: 500;
+        gap: 4px;
+      }
+      #image-paste-btn {
+        padding: 6px 8px;
+        font-size: 11px;
+        font-weight: 500;
+        background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+        border: 1.5px dashed #22c55e;
+        border-radius: 8px;
+        cursor: pointer;
+        color: #15803d;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        box-shadow: none;
+      }
+      #image-paste-btn:hover:not(:disabled) {
+        background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+        border-color: #16a34a;
+        color: #166534;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 6px rgba(34, 197, 94, 0.12);
+      }
+      #image-paste-btn:active:not(:disabled) {
+        transform: translateY(0);
+        box-shadow: none;
+      }
+      #image-paste-btn::before {
+        content: '📋';
+        font-size: 12px;
+        line-height: 1;
+      }
+      .image-lightbox {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        background: rgba(15, 23, 42, 0.82);
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        box-sizing: border-box;
+      }
+      .image-lightbox.open {
+        display: flex;
+      }
+      .image-lightbox img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        border-radius: 8px;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+        background: #0f172a;
+      }
+      .image-lightbox-close {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: auto;
+        min-width: 36px;
+        margin: 0;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.92);
+        color: #0f172a;
+        border: none;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .image-lightbox-close:hover:not(:disabled) {
+        background: #fff;
+        transform: none;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      }
+      .image-lightbox-nav {
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        width: auto;
+        min-width: 36px;
+        margin: 0;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.92);
+        color: #0f172a;
+        border: none;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        font-size: 16px;
+        font-weight: 700;
+      }
+      .image-lightbox-nav:hover:not(:disabled) {
+        background: #fff;
+        transform: translateY(-50%);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      }
+      .image-lightbox-prev {
+        left: 10px;
+      }
+      .image-lightbox-next {
+        right: 10px;
+      }
+      .image-lightbox-counter {
+        position: absolute;
+        bottom: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 11px;
+        color: #e2e8f0;
+        background: rgba(15, 23, 42, 0.65);
+        padding: 4px 10px;
+        border-radius: 999px;
       }
       .sync-queue-cancel {
         width: auto;
@@ -361,6 +530,7 @@
         border: 1px solid #e5e7eb;
         object-fit: contain;
         background: #f9fafb;
+        cursor: zoom-in;
       }
       #image-group-panel {
         display: none;
@@ -462,42 +632,43 @@
       /* 图片选择按钮美化 */
       #image-select-btn {
         width: 100%;
-        margin-bottom: 8px;
-        padding: 10px 12px;
-        font-size: 13px;
+        margin-bottom: 0;
+        padding: 6px 8px;
+        font-size: 11px;
         font-weight: 500;
         background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-        border: 2px dashed #0ea5e9;
-        border-radius: 10px;
+        border: 1.5px dashed #0ea5e9;
+        border-radius: 8px;
         cursor: pointer;
         color: #0369a1;
         transition: all 0.2s ease;
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 6px;
-        box-shadow: 0 2px 4px rgba(14, 165, 233, 0.1);
+        gap: 4px;
+        box-shadow: none;
       }
       #image-select-btn:hover {
         background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
         border-color: #0284c7;
         color: #075985;
         transform: translateY(-1px);
-        box-shadow: 0 4px 8px rgba(14, 165, 233, 0.15);
+        box-shadow: 0 2px 6px rgba(14, 165, 233, 0.12);
       }
       #image-select-btn:active {
         transform: translateY(0);
-        box-shadow: 0 2px 4px rgba(14, 165, 233, 0.1);
+        box-shadow: none;
       }
       #image-select-btn::before {
-        content: '📷 ';
-        font-size: 16px;
+        content: '📷';
+        font-size: 12px;
         line-height: 1;
       }
       
       /* 图片移除按钮美化 */
       #image-remove-btn {
         width: 100%;
+        margin-top: 8px;
         padding: 8px 12px;
         font-size: 12px;
         font-weight: 500;
@@ -670,8 +841,11 @@
         <textarea id="source-url" class="textarea-small" placeholder=""></textarea>
         <label for="image" id="image-label"></label>
         <div id="image-container" style="margin-bottom: 8px;">
-          <input type="file" id="image-input" accept="image/*" style="display: none;" />
-          <button type="button" id="image-select-btn"></button>
+          <input type="file" id="image-input" accept="image/*" multiple style="display: none;" />
+          <div class="image-actions">
+            <button type="button" id="image-select-btn"></button>
+            <button type="button" id="image-paste-btn"></button>
+          </div>
           <div id="image-group-panel">
             <p id="image-group-hint"></p>
             <div id="image-group-grid"></div>
@@ -682,8 +856,8 @@
           </div>
           <div id="image-preview-container" style="display: none;">
             <img id="image-preview" />
-            <button type="button" id="image-remove-btn"></button>
           </div>
+          <button type="button" id="image-remove-btn" style="display: none;"></button>
         </div>
         <label for="notes" id="notes-label"></label>
         <textarea id="notes" class="textarea-small" placeholder=""></textarea>
@@ -694,6 +868,14 @@
             <div id="sync-queue-list" class="sync-queue-list" role="list"></div>
           </div>
           <button type="button" id="retry-sync-btn"></button>
+        </div>
+
+        <div id="image-lightbox" class="image-lightbox" aria-hidden="true">
+          <button type="button" id="image-lightbox-close" class="image-lightbox-close" aria-label="Close">×</button>
+          <button type="button" id="image-lightbox-prev" class="image-lightbox-nav image-lightbox-prev" aria-label="Previous">‹</button>
+          <button type="button" id="image-lightbox-next" class="image-lightbox-nav image-lightbox-next" aria-label="Next">›</button>
+          <img id="image-lightbox-img" alt="" />
+          <div id="image-lightbox-counter" class="image-lightbox-counter"></div>
         </div>
 
         <!-- 设置视图 -->
