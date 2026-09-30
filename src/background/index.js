@@ -1,3 +1,4 @@
+import { resolveImageArrayBuffer } from '../utils/imagePayload.js';
 import browser from 'webextension-polyfill';
 import { getSettings } from '../utils/storage.js';
 import { PENDING_CAPTURE_KEY } from '../utils/draft.js';
@@ -175,7 +176,8 @@ function normalizeSavePayload(payload) {
     category,
     url,
     notes,
-    image: imagesToUpload[primaryUploadIndex] ?? image ?? null,
+    // Store the primary index instead of duplicating its image bytes.
+    image: null,
     images: imagesToUpload,
     primaryIndex: primaryUploadIndex,
   };
@@ -438,36 +440,6 @@ function toRelativeImagePaths(imagePaths, safeCategory) {
     const imageFileName = fullPath.split('/').pop();
     return `../Images/${safeCategory}/${imageFileName}`;
   });
-}
-
-async function resolveImageArrayBuffer(image) {
-  if (image.url) {
-    console.log('Downloading image from URL:', image.url);
-    const imageResponse = await fetch(image.url);
-    if (!imageResponse.ok) {
-      throw new Error(`Failed to download image: ${imageResponse.status} ${imageResponse.statusText}`);
-    }
-    const imageArrayBuffer = await imageResponse.arrayBuffer();
-    console.log('Downloaded image size:', imageArrayBuffer.byteLength);
-    return imageArrayBuffer;
-  }
-
-  if (image.arrayBuffer) {
-    if (Array.isArray(image.arrayBuffer)) {
-      const uint8Array = new Uint8Array(image.arrayBuffer);
-      const imageArrayBuffer = uint8Array.buffer;
-      if (imageArrayBuffer.byteLength === 0) {
-        throw new Error('Image ArrayBuffer is empty after conversion');
-      }
-      return imageArrayBuffer;
-    }
-    if (image.arrayBuffer.byteLength === 0) {
-      throw new Error('Image ArrayBuffer is empty');
-    }
-    return image.arrayBuffer;
-  }
-
-  throw new Error('Invalid image data');
 }
 
 function buildImageOnlyMarkdown({ category, imagePath, imagePaths = [], url, notes }) {

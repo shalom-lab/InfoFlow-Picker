@@ -183,6 +183,8 @@ InfoFlow-Picker/
 
 ## 📝 数据格式
 
+当前实现的完整格式请参阅 [GitHub 采集数据格式规范](docs/github-data-format.md)，涵盖字段、文件命名、多图引用和上传行为。下方为旧版简化示例，存在差异时以规范文档为准。
+
 ### JSON 格式
 
 ```json

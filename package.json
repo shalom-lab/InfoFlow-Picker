@@ -1,6 +1,6 @@
 {
   "name": "infoflow-picker",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "build": "npm run clean && npm run build:chrome && npm run build:firefox",
     "dev": "node scripts/build.mjs watch",
     "version:bump": "node scripts/version.mjs",
-    "test": "echo \"No tests yet - add unit tests.\""
+    "test": "node --test"
   },
   "dependencies": {
     "webextension-polyfill": "^0.12.0"

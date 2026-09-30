@@ -25,6 +25,7 @@
     "statusQueued": "已保存到本地，后台同步 GitHub 中…",
     "statusSuccess": "已同步到 GitHub！",
     "statusError": "保存失败，请检查设置。",
+    "statusErrorDetails": "保存失败：{message}",
     "statusSyncPending": "后台同步中：还有 {n} 条",
     "statusSyncFailed": "有 {n} 条同步失败，将自动重试",
     "retrySyncButton": "立即重试同步",

@@ -25,6 +25,7 @@
     "statusQueued": "Saved locally — syncing to GitHub in the background…",
     "statusSuccess": "Synced to GitHub!",
     "statusError": "Failed. Check settings.",
+    "statusErrorDetails": "Save failed: {message}",
     "statusSyncPending": "Background sync: {n} left",
     "statusSyncFailed": "{n} item(s) failed — will retry automatically",
     "retrySyncButton": "Retry sync now",

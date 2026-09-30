@@ -1,3 +1,4 @@
+import { buildImagePayloadFromItem } from '../utils/imagePayload.js';
 import browser from 'webextension-polyfill';
 import { getSettings, saveSettings, DEFAULT_CATEGORIES } from '../utils/storage.js';
 import {
@@ -666,21 +667,6 @@ function syncCurrentImageFromGroup() {
   }
 }
 
-function buildImagePayloadFromItem(item) {
-  if (item.base64) {
-    const binaryString = atob(item.base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    return {
-      arrayBuffer: Array.from(new Uint8Array(bytes.buffer)),
-      type: item.type || 'image/png',
-    };
-  }
-  return { url: item.url };
-}
-
 function getImagesPayloadForSave() {
   if (!imageGroupState) {
     if (!currentImageFile) return { images: [], primaryIndex: 0 };
@@ -698,7 +684,7 @@ function getImagesPayloadForSave() {
         ? currentImageFile.arrayBuffer
         : Array.from(new Uint8Array(currentImageFile.arrayBuffer));
       return {
-        images: [{ arrayBuffer: arr, type: currentImageFile.type || 'image/png' }],
+        images: [buildImagePayloadFromItem({ arrayBuffer: arr, type: currentImageFile.type })],
         primaryIndex: 0,
       };
     }
@@ -1127,7 +1113,7 @@ async function handleSave() {
         category,
         url,
         notes,
-        image: imageData,
+        image: hasImages ? undefined : imageData,
         images: hasImages ? imagesPayload : undefined,
         primaryIndex,
       },
@@ -1147,7 +1133,7 @@ async function handleSave() {
     if (error?.message?.includes('GitHub') || error?.message?.includes('Missing GitHub')) {
       setStatus('missingGithub', 'error');
     } else {
-      setStatus('statusError', 'error');
+      setStatus('statusErrorDetails', 'error', { message: error?.message || String(error) });
     }
   } finally {
     saving = false;
