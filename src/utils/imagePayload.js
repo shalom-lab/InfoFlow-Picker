@@ -1,4 +1,6 @@
-/** Keep image bytes compact across extension messaging and JSON storage. */
+import { getSyncImage, putSyncImage } from './syncImages.js';
+
+/** Legacy representation, also used before persisting new images to IndexedDB. */
 export function buildImagePayloadFromItem(item) {
   if (item.base64) {
     return { base64: item.base64, type: item.type || 'image/png' };
@@ -15,6 +17,9 @@ export function buildImagePayloadFromItem(item) {
 }
 
 export async function resolveImageArrayBuffer(image) {
+  if (image.storageId) {
+    return (await getSyncImage(image.storageId)).arrayBuffer();
+  }
   if (image.base64) {
     const binary = atob(image.base64);
     return Uint8Array.from(binary, (character) => character.charCodeAt(0)).buffer;
@@ -33,4 +38,20 @@ export async function resolveImageArrayBuffer(image) {
     return response.arrayBuffer();
   }
   throw new Error('Invalid image data');
+}
+
+/** Only small refs cross runtime.sendMessage or enter chrome.storage.local. */
+export async function persistImagesForSave(images, storeImage = putSyncImage) {
+  const refs = [];
+  for (const image of images) {
+    if (image.storageId) {
+      refs.push({ storageId: image.storageId, type: image.type || 'image/png' });
+    } else if (image.base64 || image.arrayBuffer || /^(data:|blob:)/.test(image.url || '')) {
+      const blob = new Blob([await resolveImageArrayBuffer(image)], { type: image.type || 'image/png' });
+      refs.push({ storageId: await storeImage(blob), type: blob.type });
+    } else {
+      refs.push({ url: image.url });
+    }
+  }
+  return refs;
 }

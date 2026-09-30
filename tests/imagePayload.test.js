@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { buildImagePayloadFromItem, resolveImageArrayBuffer } from '../src/utils/imagePayload.js';
+import { buildImagePayloadFromItem, resolveImageArrayBuffer, persistImagesForSave } from '../src/utils/imagePayload.js';
+import { imageExtension } from '../src/utils/optimizeImage.js';
 
 // Exercise the actual background normalization without starting extension listeners.
 const background = readFileSync(new URL('../src/background/index.js', import.meta.url), 'utf8');
@@ -55,7 +56,7 @@ test('page image URLs still download unchanged', async (t) => {
 
 const popup = readFileSync(new URL('../src/popup/index.js', import.meta.url), 'utf8');
 const pickerSource = popup.slice(popup.indexOf('function getImagesPayloadForSave('), popup.indexOf('function handleImageSelect('));
-const previewSource = popup.slice(popup.indexOf('function imagePayloadToPreviewSrc('), popup.indexOf('async function loadSourceUrl('));
+const previewSource = popup.slice(popup.indexOf('async function imagePayloadToPreviewSrc('), popup.indexOf('async function loadSourceUrl('));
 
 test('mixed local, pasted and extracted images preserve selection, primary image and queue previews', async () => {
   const context = vm.createContext({
@@ -80,7 +81,7 @@ test('mixed local, pasted and extracted images preserve selection, primary image
   assert.deepEqual(queued.images.map((image) => image.base64 || image.url), [
     'AAEC', 'AwQF', 'BgcI', 'https://example.com/remote.png',
   ]);
-  assert.deepEqual(Array.from(context.getQueueItemImageSources(queued)), [
+  assert.deepEqual(Array.from(await context.getQueueItemImageSources(queued)), [
     'data:image/png;base64,AAEC', 'data:image/png;base64,AwQF',
     'data:image/png;base64,BgcI', 'https://example.com/remote.png',
   ]);
@@ -89,6 +90,20 @@ test('mixed local, pasted and extracted images preserve selection, primary image
   assert.equal(subset.primaryIndex, 0); // Unselected primary falls back to the first selected image.
   assert.equal(subset.images.length, 2);
   assert.equal(subset.images[0].base64, 'AwQF');
+});
+
+test('large images are stored before messaging and failures prevent sending references', async () => {
+  const blobs = [];
+  const refs = await persistImagesForSave([
+    { base64: 'AAAA'.repeat(6 * 1024 * 1024), type: 'image/png' },
+    { url: 'https://example.com/image.png' },
+  ], async (blob) => { blobs.push(blob); return 'saved-image'; });
+  assert.equal(blobs[0].size, 18 * 1024 * 1024);
+  assert.ok(JSON.stringify({ type: 'SAVE_SELECTION', payload: { images: refs } }).length < 256);
+  assert.deepEqual(refs, [{ storageId: 'saved-image', type: 'image/png' }, { url: 'https://example.com/image.png' }]);
+  await assert.rejects(persistImagesForSave([{ base64: 'AAEC' }], async () => {
+    throw new Error('Disk full');
+  }), /Disk full/);
 });
 
 test('single-image popup fallback supports captured, local and legacy image representations', () => {
@@ -113,6 +128,7 @@ test('mixed images reach the GitHub upload boundary and metadata references the 
   const settings = { github: { basePath: 'infoflow-data' }, outputFormats: 'json+md' };
   const context = vm.createContext({
     resolveImageArrayBuffer,
+    imageExtension,
     uploadToGitHub: async (upload) => uploads.push(upload),
   });
   vm.runInContext(background.slice(background.indexOf('function buildUploadPlan('), background.indexOf('async function uploadToGitHub(')), context);
@@ -120,7 +136,7 @@ test('mixed images reach the GitHub upload boundary and metadata references the 
   const payload = JSON.parse(JSON.stringify(normalize({
     category: 'Insight', content: 'Mixed images', primaryIndex: 2,
     images: [
-      { base64: 'AAEC', type: 'image/png' },
+      { base64: 'AAEC', type: 'image/jpeg' },
       { base64: 'AwQF', type: 'image/png' },
       { url: 'data:image/png;base64,BgcI' },
     ],
@@ -128,6 +144,7 @@ test('mixed images reach the GitHub upload boundary and metadata references the 
   await context.uploadSelectionToGitHub(payload, settings);
   const binaries = uploads.filter((upload) => upload.isBinary);
   assert.equal(binaries.length, 3);
+  assert.ok(binaries[0].filePath.endsWith('.jpg'));
   for (let i = 0; i < binaries.length; i++) {
     assert.deepEqual(Array.from(new Uint8Array(binaries[i].content)), [i * 3, i * 3 + 1, i * 3 + 2]);
   }

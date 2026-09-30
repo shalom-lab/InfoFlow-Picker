@@ -1,4 +1,6 @@
-import { buildImagePayloadFromItem } from '../utils/imagePayload.js';
+import { optimizeImage } from '../utils/optimizeImage.js';
+import { getSyncImage } from '../utils/syncImages.js';
+import { buildImagePayloadFromItem, persistImagesForSave } from '../utils/imagePayload.js';
 import browser from 'webextension-polyfill';
 import { getSettings, saveSettings, DEFAULT_CATEGORIES } from '../utils/storage.js';
 import {
@@ -724,56 +726,12 @@ function handleImageRemove() {
   persistDraftNow();
 }
 
-/**
- * Convert an image Blob/File to a PNG item used by the picker UI / save payload.
- * @param {Blob} blob
- * @returns {Promise<{url: string, base64: string, type: string, arrayBuffer: number[]}>}
- */
-function processBlobToPngItem(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth || img.width;
-        canvas.height = img.naturalHeight || img.height;
-        if (!canvas.width || !canvas.height) {
-          reject(new Error('Invalid image dimensions'));
-          return;
-        }
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        canvas.toBlob(async (pngBlob) => {
-          try {
-            if (!pngBlob || pngBlob.size === 0) {
-              reject(new Error('Empty PNG blob'));
-              return;
-            }
-            const arrayBuffer = await pngBlob.arrayBuffer();
-            if (!arrayBuffer.byteLength) {
-              reject(new Error('Empty ArrayBuffer'));
-              return;
-            }
-            const uint8Array = new Uint8Array(arrayBuffer);
-            const base64 = uint8ToBase64(uint8Array);
-            resolve({
-              url: `data:image/png;base64,${base64}`,
-              base64,
-              type: 'image/png',
-              arrayBuffer: Array.from(uint8Array),
-            });
-          } catch (error) {
-            reject(error);
-          }
-        }, 'image/png');
-      };
-      img.onerror = () => reject(new Error('Image decode failed'));
-      img.src = reader.result;
-    };
-    reader.onerror = () => reject(new Error('FileReader failed'));
-    reader.readAsDataURL(blob);
-  });
+/** Optimize local/clipboard images before persisting the draft. */
+async function processBlobToImageItem(blob) {
+  const optimized = await optimizeImage(blob);
+  const base64 = uint8ToBase64(new Uint8Array(await optimized.arrayBuffer()));
+  const type = optimized.type || 'image/png';
+  return { url: `data:${type};base64,${base64}`, base64, type };
 }
 
 function uint8ToBase64(uint8Array) {
@@ -885,7 +843,7 @@ async function appendImagesFromBlobs(blobs, { announce = true } = {}) {
   const run = async () => {
     const items = [];
     for (const blob of blobs) {
-      items.push(await processBlobToPngItem(blob));
+      items.push(await processBlobToImageItem(blob));
     }
     applyLocalImageItems(items, { append: true });
     await persistDraftNow();
@@ -1027,7 +985,15 @@ function revokeSyncQueueObjectUrls() {
   syncQueuePreviewMap.clear();
 }
 
-function imagePayloadToPreviewSrc(image) {
+async function imagePayloadToPreviewSrc(image) {
+  if (image?.storageId) {
+    try {
+      const blob = await getSyncImage(image.storageId);
+      return URL.createObjectURL(blob);
+    } catch {
+      return null;
+    }
+  }
   if (!image) return null;
   if (image.url && (image.url.startsWith('http') || image.url.startsWith('data:'))) {
     return image.url;
@@ -1044,13 +1010,13 @@ function imagePayloadToPreviewSrc(image) {
   return null;
 }
 
-function getQueueItemImageSources(payload) {
+async function getQueueItemImageSources(payload) {
   const images = Array.isArray(payload?.images) && payload.images.length
     ? payload.images
     : payload?.image
       ? [payload.image]
       : [];
-  return images.map(imagePayloadToPreviewSrc).filter(Boolean);
+  return (await Promise.all(images.map(imagePayloadToPreviewSrc))).filter(Boolean);
 }
 
 async function loadSourceUrl() {
@@ -1105,6 +1071,9 @@ async function handleSave() {
       };
     }
     
+    // Commit image bytes locally before sending only references to the background.
+    const storedImages = await persistImagesForSave(hasImages ? imagesPayload : imageData ? [imageData] : []);
+
     // Persist to local sync queue first; GitHub upload continues after popup may close.
     await browser.runtime.sendMessage({
       type: 'SAVE_SELECTION',
@@ -1113,8 +1082,7 @@ async function handleSave() {
         category,
         url,
         notes,
-        image: hasImages ? undefined : imageData,
-        images: hasImages ? imagesPayload : undefined,
+        images: storedImages,
         primaryIndex,
       },
     });
@@ -1150,7 +1118,7 @@ async function refreshSyncStatus() {
   try {
     const summary = await browser.runtime.sendMessage({ type: 'GET_SYNC_STATUS' });
     lastSyncSummary = summary;
-    renderSyncQueue(summary);
+    await renderSyncQueue(summary);
 
     if (!summary || summary.total === 0) {
       if (retrySyncBtn) retrySyncBtn.style.display = 'none';
@@ -1189,7 +1157,10 @@ function updateSyncQueueToggleLabel() {
     : tFmt('syncQueueToggleShow', { n: count });
 }
 
-function renderSyncQueue(summary) {
+let syncQueueRenderGeneration = 0;
+
+async function renderSyncQueue(summary) {
+  const generation = ++syncQueueRenderGeneration;
   if (!syncQueuePanel || !syncQueueList || !syncQueueToggle) return;
 
   revokeSyncQueueObjectUrls();
@@ -1219,7 +1190,13 @@ function renderSyncQueue(summary) {
     row.setAttribute('role', 'listitem');
     row.dataset.id = item.id;
 
-    const imageSources = getQueueItemImageSources(item.payload);
+    const imageSources = await getQueueItemImageSources(item.payload);
+    const objectUrls = imageSources.filter((src) => src.startsWith('blob:'));
+    if (generation !== syncQueueRenderGeneration) {
+      objectUrls.forEach((src) => URL.revokeObjectURL(src));
+      return;
+    }
+    syncQueueObjectUrls.push(...objectUrls);
     syncQueuePreviewMap.set(item.id, imageSources);
     const thumbs = document.createElement('div');
     thumbs.className = 'sync-queue-thumbs';
@@ -1330,7 +1307,7 @@ async function handleSyncQueueListClick(event) {
       id: btn.dataset.id,
     });
     lastSyncSummary = summary;
-    renderSyncQueue(summary);
+    await renderSyncQueue(summary);
     if (!summary || summary.total === 0) {
       if (retrySyncBtn) retrySyncBtn.style.display = 'none';
       setStatus('statusIdle', 'muted');

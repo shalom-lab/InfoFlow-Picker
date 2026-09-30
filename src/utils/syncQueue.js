@@ -1,4 +1,5 @@
 import browser from 'webextension-polyfill';
+import { deleteSyncImages } from './syncImages.js';
 
 export const SYNC_QUEUE_KEY = 'syncQueue';
 export const SYNC_ALARM_NAME = 'infoflow-sync-queue';
@@ -66,6 +67,12 @@ export async function removeSyncItem(id) {
   const queue = await getSyncQueue();
   const next = queue.filter((item) => item.id !== id);
   await setSyncQueue(next);
+  const removed = queue.find((item) => item.id === id);
+  try {
+    await deleteSyncImages(removed?.payload?.images || []);
+  } catch (error) {
+    console.warn('Queued image cleanup failed:', error);
+  }
   return next;
 }
 

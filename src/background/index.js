@@ -1,3 +1,4 @@
+import { imageExtension } from '../utils/optimizeImage.js';
 import { resolveImageArrayBuffer } from '../utils/imagePayload.js';
 import browser from 'webextension-polyfill';
 import { getSettings } from '../utils/storage.js';
@@ -303,7 +304,7 @@ function buildUploadPlan(payload, settings) {
   const shouldUploadMd = formats === 'json+md' || formats === 'md';
 
   const imagePaths = imagesToUpload.map(
-    (_, index) => `${base}/Images/${safeCategory}/${time}-${randomSuffix}-${index}.png`,
+    (img, index) => `${base}/Images/${safeCategory}/${time}-${randomSuffix}-${index}.${imageExtension(img)}`,
   );
 
   let jsonPath = null;

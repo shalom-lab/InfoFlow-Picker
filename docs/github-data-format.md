@@ -1,6 +1,6 @@
 # GitHub 采集数据格式规范
 
-本文记录 InfoFlow Picker 0.2.5 当前实现写入 GitHub 的文件结构与内容格式，供后续开发、数据读取和导入使用。依据为 `src/background/index.js` 和 `src/utils/storage.js`，核对日期为 2026-09-30。
+本文记录 InfoFlow Picker 0.2.6 当前实现写入 GitHub 的文件结构与内容格式，供后续开发、数据读取和导入使用。依据为 `src/background/index.js` 和 `src/utils/storage.js`，核对日期为 2026-09-30。
 
 ## 1. 项目与数据流
 
@@ -10,7 +10,7 @@ InfoFlow Picker 是一个浏览器扩展，支持采集网页选中文本、右�
 - `src/popup/`：编辑采集内容、选择多图、管理草稿和提交保存。
 - `src/options/`：配置 GitHub 目标、分类、语言和输出格式。
 - `src/utils/draft.js`、`draftImages.js`：保存草稿及图片数据；草稿图片二进制存入 IndexedDB。
-- `src/utils/syncQueue.js`：将保存任务持久化到浏览器本地存储，并管理状态、重试与徽标。
+- `src/utils/syncQueue.js`：将保存任务和图片引用持久化到浏览器本地存储，并管理状态、重试与徽标；`syncImages.js` 将待上传图片二进制独立存入 IndexedDB。
 - `src/background/index.js`：校验输入、生成固定上传路径、上传图片和数据文件。
 - `scripts/build.mjs`：使用 esbuild 构建 Chrome Manifest V3 和 Firefox Manifest V2 扩展。
 
@@ -144,7 +144,7 @@ JSON 的 `image`、`images` 和 Markdown 图片链接均相对于数据文件所
 
 读取端应以数据文件目录解析路径，不能直接将其当成仓库根目录路径或网页图片原始 URL。最终 JSON 不保存每张图片的原始 URL。
 
-当前上传文件统一使用 `.png` 扩展名，但后台 `resolveImageArrayBuffer` 对 URL 下载或传入的二进制数据直接上传，不保证重新编码为 PNG。因此不能仅凭扩展名断言实际图片格式。
+以上示例以 PNG 为例。0.2.6 起按图片 MIME 类型生成扩展名：JPEG 使用 `.jpg`，PNG 使用 `.png`，WebP 等使用对应后缀。手动选图和粘贴会尝试质量 90% 的 JPEG，仅在体积更小时采用。URL 图片缺少已知类型时仍回退到 `.png`；后台不会据此重新编码。读取端应使用 JSON 中的实际路径，不要自行拼接 `.png` 后缀。
 
 ## 7. GitHub 写入行为
 
