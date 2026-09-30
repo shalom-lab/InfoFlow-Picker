@@ -5,6 +5,8 @@
     "sourceUrlLabel": "链接",
     "imageLabel": "图片",
     "selectImageButton": "选图",
+    "skipImageCompression": "本次不压缩图片",
+    "imageCompressionHint": "仅手动上传和粘贴：原图大于 2 MB 才尝试压缩，重新打开弹窗恢复默认。",
     "pasteImageButton": "粘贴",
     "removeImageButton": "清除",
     "imageGroupHint": "共 {total} 张，已选 {selected} 张",

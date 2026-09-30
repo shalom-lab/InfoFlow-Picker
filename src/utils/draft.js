@@ -81,6 +81,7 @@ export function normalizeDraftImageList(draft) {
       url: item.url || '',
       type: item.type,
       base64: item.base64,
+      localImage: item.localImage === true,
       index,
     }));
   }
@@ -201,8 +202,9 @@ export function applyMergedImagesToDraft(draft, images, clickedIndex = 0) {
   const normalized = images.map((item, index) => ({ ...item, index }));
   const safeClicked = Math.min(Math.max(clickedIndex, 0), normalized.length - 1);
 
-  draft.imageItems = normalized.map(({ id, url, type, index }) => {
+  draft.imageItems = normalized.map(({ id, url, type, index, localImage }) => {
     const entry = { index };
+    if (localImage) entry.localImage = true;
     if (id) entry.id = id;
     const safe = storageUrl(url);
     if (safe) entry.url = safe;

@@ -1,4 +1,3 @@
-import { optimizeImage } from '../utils/optimizeImage.js';
 import { getSyncImage } from '../utils/syncImages.js';
 import { buildImagePayloadFromItem, persistImagesForSave } from '../utils/imagePayload.js';
 import browser from 'webextension-polyfill';
@@ -33,6 +32,7 @@ const imageSelectBtn = document.getElementById('image-select-btn');
 const imagePasteBtn = document.getElementById('image-paste-btn');
 const imagePreviewContainer = document.getElementById('image-preview-container');
 const imagePreview = document.getElementById('image-preview');
+const skipCompressionEl = document.getElementById('skip-image-compression');
 const imageRemoveBtn = document.getElementById('image-remove-btn');
 const imageGroupPanel = document.getElementById('image-group-panel');
 const imageGroupHint = document.getElementById('image-group-hint');
@@ -186,6 +186,8 @@ function applyTranslations() {
   if (imagePasteBtn) {
     imagePasteBtn.textContent = t(currentLanguage, 'pasteImageButton');
   }
+  document.getElementById('skip-image-compression-label').textContent = t(currentLanguage, 'skipImageCompression');
+  document.getElementById('image-compression-hint').textContent = t(currentLanguage, 'imageCompressionHint');
   imageRemoveBtn.textContent = t(currentLanguage, 'removeImageButton');
   imageGroupSelectAllBtn.textContent = t(currentLanguage, 'imageGroupSelectAll');
   imageGroupSelectCurrentBtn.textContent = t(currentLanguage, 'imageGroupSelectCurrentOnly');
@@ -726,12 +728,11 @@ function handleImageRemove() {
   persistDraftNow();
 }
 
-/** Optimize local/clipboard images before persisting the draft. */
+/** Keep originals in the draft so this session's switch can be changed anytime. */
 async function processBlobToImageItem(blob) {
-  const optimized = await optimizeImage(blob);
-  const base64 = uint8ToBase64(new Uint8Array(await optimized.arrayBuffer()));
-  const type = optimized.type || 'image/png';
-  return { url: `data:${type};base64,${base64}`, base64, type };
+  const base64 = uint8ToBase64(new Uint8Array(await blob.arrayBuffer()));
+  const type = blob.type || 'image/png';
+  return { url: `data:${type};base64,${base64}`, base64, type, localImage: true };
 }
 
 function uint8ToBase64(uint8Array) {
@@ -1072,7 +1073,11 @@ async function handleSave() {
     }
     
     // Commit image bytes locally before sending only references to the background.
-    const storedImages = await persistImagesForSave(hasImages ? imagesPayload : imageData ? [imageData] : []);
+    const storedImages = await persistImagesForSave(
+      hasImages ? imagesPayload : imageData ? [imageData] : [],
+      undefined,
+      { skipCompression: skipCompressionEl.checked },
+    );
 
     // Persist to local sync queue first; GitHub upload continues after popup may close.
     await browser.runtime.sendMessage({

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { buildImagePayloadFromItem, resolveImageArrayBuffer, persistImagesForSave } from '../src/utils/imagePayload.js';
-import { imageExtension } from '../src/utils/optimizeImage.js';
+import { imageExtension, optimizeImage, IMAGE_COMPRESSION_THRESHOLD } from '../src/utils/optimizeImage.js';
 
 // Exercise the actual background normalization without starting extension listeners.
 const background = readFileSync(new URL('../src/background/index.js', import.meta.url), 'utf8');
@@ -11,6 +11,31 @@ const normalize = vm.runInNewContext(`(${background.slice(
   background.indexOf('function normalizeSavePayload('),
   background.indexOf('async function assertGithubSettings('),
 )})`);
+
+test('small and exactly 2 MiB originals skip encoding; session override skips large images', async () => {
+  for (const size of [12, IMAGE_COMPRESSION_THRESHOLD]) {
+    const original = new Blob([new Uint8Array(size)], { type: 'image/png' });
+    assert.equal(await optimizeImage(original), original);
+  }
+  const original = new Blob([new Uint8Array(IMAGE_COMPRESSION_THRESHOLD + 1)], { type: 'image/png' });
+  assert.equal(await optimizeImage(original, { skipCompression: true }), original);
+});
+
+test('local source survives draft metadata and payload construction, page images stay unmarked', () => {
+  const draftSource = readFileSync(new URL('../src/utils/draft.js', import.meta.url), 'utf8');
+  const context = vm.createContext({});
+  vm.runInContext(draftSource.slice(draftSource.indexOf('function storageUrl('), draftSource.indexOf('export function mergePendingIntoDraft('))
+    .replace('export function', 'function'), context);
+  vm.runInContext(draftSource.slice(draftSource.indexOf('export function normalizeDraftImageList('), draftSource.indexOf('function normalizePendingImages('))
+    .replace('export function', 'function'), context);
+  const draft = {};
+  context.applyMergedImagesToDraft(draft, [{ id: 'local', localImage: true, type: 'image/png' }, { id: 'page', type: 'image/png' }]);
+  const restored = context.normalizeDraftImageList(draft);
+  assert.equal(restored[0].localImage, true);
+  assert.equal(restored[1].localImage, false);
+  assert.equal(buildImagePayloadFromItem({ ...restored[0], base64: 'AAEC' }).localImage, true);
+  assert.equal(buildImagePayloadFromItem({ ...restored[1], base64: 'AAEC' }).localImage, undefined);
+});
 
 test('a 2 MiB local image survives messaging, queue storage and upload decoding', async () => {
   const bytes = new Uint8Array(2 * 1024 * 1024);

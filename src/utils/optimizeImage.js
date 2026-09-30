@@ -1,5 +1,8 @@
-/** Preserve dimensions; prefer a quality-90 JPEG only when it saves bytes. */
-export async function optimizeImage(blob) {
+export const IMAGE_COMPRESSION_THRESHOLD = 2 * 1024 * 1024;
+
+/** Preserve dimensions; only attempt JPEG for originals strictly above 2 MiB. */
+export async function optimizeImage(blob, { skipCompression = false } = {}) {
+  if (skipCompression || blob.size <= IMAGE_COMPRESSION_THRESHOLD) return blob;
   const source = URL.createObjectURL(blob);
   try {
     const img = new Image();

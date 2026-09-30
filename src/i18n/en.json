@@ -5,6 +5,8 @@
     "sourceUrlLabel": "Source URL",
     "imageLabel": "Image",
     "selectImageButton": "Select",
+    "skipImageCompression": "Keep original images this session",
+    "imageCompressionHint": "Uploads and pastes only: compress originals over 2 MB. Resets when the popup reopens.",
     "pasteImageButton": "Paste",
     "removeImageButton": "Clear",
     "imageGroupHint": "{selected} of {total} selected",

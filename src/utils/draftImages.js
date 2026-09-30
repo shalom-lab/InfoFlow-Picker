@@ -200,6 +200,7 @@ export async function hydrateDraftImageSlots(slots) {
         id,
         index,
         base64: slot.base64,
+        localImage: slot.localImage === true,
         type: slot.type || 'image/png',
         url: slot.url && !String(slot.url).startsWith('data:')
           ? slot.url
@@ -216,6 +217,7 @@ export async function hydrateDraftImageSlots(slots) {
           id: slot.id,
           index,
           base64,
+          localImage: slot.localImage === true,
           type: record.type || slot.type || 'image/png',
           url: `data:${record.type || slot.type || 'image/png'};base64,${base64}`,
         });

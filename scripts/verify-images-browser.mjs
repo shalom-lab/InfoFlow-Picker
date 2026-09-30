@@ -44,19 +44,37 @@ try {
     ctx.putImageData(pixels, 0, 0);
     const png = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
     const optimized = await imageTest.optimizeImage(png);
+    const pngBytes = await png.arrayBuffer();
+    const items = [
+      { arrayBuffer: pngBytes, type: 'image/png', localImage: true },
+      { arrayBuffer: pngBytes, type: 'image/png', localImage: true },
+      { arrayBuffer: pngBytes, type: 'image/png' },
+    ];
+    const automatic = await imageTest.persistImagesForSave(items);
+    const originals = await imageTest.persistImagesForSave(items, undefined, { skipCompression: true });
+    const originalBlobs = await Promise.all(originals.map(ref => imageTest.getSyncImage(ref.storageId)));
+    const originalBytesMatch = (await Promise.all(originalBlobs.map(async blob => {
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      return bytes.every((byte, i) => byte === new Uint8Array(pngBytes)[i]);
+    }))).every(Boolean);
+    await imageTest.deleteSyncImages([...automatic, ...originals]);
     const bitmap = await createImageBitmap(optimized);
     const stored = await imageTest.putSyncImage(optimized);
     localStorage.setItem('jpegRef', stored);
     const tiny = new Blob([Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII='), c => c.charCodeAt(0))], { type: 'image/png' });
     const kept = await imageTest.optimizeImage(tiny);
     return { before: png.size, after: optimized.size, type: optimized.type,
-      width: bitmap.width, height: bitmap.height, tinyRetained: kept === tiny };
+      width: bitmap.width, height: bitmap.height, tinyRetained: kept === tiny,
+      automaticTypes: automatic.map(ref => ref.type), originalTypes: originals.map(ref => ref.type), originalBytesMatch };
   });
   assert.equal(compressed.type, 'image/jpeg');
   assert.ok(compressed.after < compressed.before);
   assert.equal(compressed.width, 1024);
   assert.equal(compressed.height, 1024);
   assert.equal(compressed.tinyRetained, true);
+  assert.deepEqual(compressed.automaticTypes, ['image/jpeg', 'image/jpeg', 'image/png']);
+  assert.deepEqual(compressed.originalTypes, ['image/png', 'image/png', 'image/png']);
+  assert.equal(compressed.originalBytesMatch, true);
   console.log('Canvas compression:', compressed);
   const saved = await page.evaluate(async () => {
     // This exceeds the runtime message limit if encoded inline as Base64.

@@ -1,9 +1,10 @@
 import { getSyncImage, putSyncImage } from './syncImages.js';
+import { optimizeImage } from './optimizeImage.js';
 
 /** Legacy representation, also used before persisting new images to IndexedDB. */
 export function buildImagePayloadFromItem(item) {
   if (item.base64) {
-    return { base64: item.base64, type: item.type || 'image/png' };
+    return { base64: item.base64, type: item.type || 'image/png', ...(item.localImage ? { localImage: true } : {}) };
   }
   if (item.arrayBuffer) {
     const bytes = new Uint8Array(item.arrayBuffer);
@@ -11,7 +12,7 @@ export function buildImagePayloadFromItem(item) {
     for (let offset = 0; offset < bytes.length; offset += 0x8000) {
       binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
     }
-    return { base64: btoa(binary), type: item.type || 'image/png' };
+    return { base64: btoa(binary), type: item.type || 'image/png', ...(item.localImage ? { localImage: true } : {}) };
   }
   return { url: item.url };
 }
@@ -41,13 +42,14 @@ export async function resolveImageArrayBuffer(image) {
 }
 
 /** Only small refs cross runtime.sendMessage or enter chrome.storage.local. */
-export async function persistImagesForSave(images, storeImage = putSyncImage) {
+export async function persistImagesForSave(images, storeImage = putSyncImage, { skipCompression = false } = {}) {
   const refs = [];
   for (const image of images) {
     if (image.storageId) {
       refs.push({ storageId: image.storageId, type: image.type || 'image/png' });
     } else if (image.base64 || image.arrayBuffer || /^(data:|blob:)/.test(image.url || '')) {
-      const blob = new Blob([await resolveImageArrayBuffer(image)], { type: image.type || 'image/png' });
+      const original = new Blob([await resolveImageArrayBuffer(image)], { type: image.type || 'image/png' });
+      const blob = image.localImage ? await optimizeImage(original, { skipCompression }) : original;
       refs.push({ storageId: await storeImage(blob), type: blob.type });
     } else {
       refs.push({ url: image.url });

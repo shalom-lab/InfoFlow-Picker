@@ -1,6 +1,6 @@
 # GitHub 采集数据格式规范
 
-本文记录 InfoFlow Picker 0.2.6 当前实现写入 GitHub 的文件结构与内容格式，供后续开发、数据读取和导入使用。依据为 `src/background/index.js` 和 `src/utils/storage.js`，核对日期为 2026-09-30。
+本文记录 InfoFlow Picker 0.2.7 当前实现写入 GitHub 的文件结构与内容格式，供后续开发、数据读取和导入使用。依据为 `src/background/index.js` 和 `src/utils/storage.js`，核对日期为 2026-09-30。
 
 ## 1. 项目与数据流
 
@@ -144,7 +144,7 @@ JSON 的 `image`、`images` 和 Markdown 图片链接均相对于数据文件所
 
 读取端应以数据文件目录解析路径，不能直接将其当成仓库根目录路径或网页图片原始 URL。最终 JSON 不保存每张图片的原始 URL。
 
-以上示例以 PNG 为例。0.2.6 起按图片 MIME 类型生成扩展名：JPEG 使用 `.jpg`，PNG 使用 `.png`，WebP 等使用对应后缀。手动选图和粘贴会尝试质量 90% 的 JPEG，仅在体积更小时采用。URL 图片缺少已知类型时仍回退到 `.png`；后台不会据此重新编码。读取端应使用 JSON 中的实际路径，不要自行拼接 `.png` 后缀。
+以上示例以 PNG 为例。0.2.6 起按图片 MIME 类型生成扩展名：JPEG 使用 `.jpg`，PNG 使用 `.png`，WebP 等使用对应后缀。手动选图和粘贴的原图大于 2 MiB 时，提交时会尝试质量 90% 的 JPEG，仅在体积更小时采用；勾选“本次不压缩图片”时使用原图。URL 图片缺少已知类型时仍回退到 `.png`；后台不会据此重新编码。读取端应使用 JSON 中的实际路径，不要自行拼接 `.png` 后缀。
 
 ## 7. GitHub 写入行为
 
