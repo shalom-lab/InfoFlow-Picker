@@ -323,6 +323,8 @@ function buildUploadPlan(payload, settings) {
     imagePaths,
     jsonPath,
     mdPath,
+    // Freeze clock so retries produce identical JSON/MD bytes and can skip PUT.
+    savedAt: new Date().toISOString(),
   };
 }
 
@@ -348,23 +350,20 @@ async function uploadSelectionToGitHub(payload, settings) {
 
   const resolvedSettings = settings ?? (await assertGithubSettings());
   const plan = payload.uploadPlan ?? buildUploadPlan(payload, resolvedSettings);
-  const { safeCategory, imagePaths, jsonPath, mdPath } = plan;
+  const { safeCategory, imagePaths, jsonPath, mdPath, savedAt } = plan;
   const imagePath = imagePaths[primaryUploadIndex] ?? imagePaths[0] ?? null;
+  const recordSavedAt = savedAt || new Date().toISOString();
 
-  if (imagesToUpload.length > 0) {
-    await Promise.all(
-      imagesToUpload.map(async (img, index) => {
-        const imageArrayBuffer = await resolveImageArrayBuffer(img);
-        const filePath = imagePaths[index];
-        await uploadToGitHub({
-          filePath,
-          content: imageArrayBuffer,
-          settings: resolvedSettings,
-          isBinary: true,
-        });
-        return filePath;
-      }),
-    );
+  // Serial uploads: GitHub Contents API commits against the branch tip; parallel
+  // PUTs race and surface as 409 "is at X but expected Y" even for different paths.
+  for (let index = 0; index < imagesToUpload.length; index++) {
+    const imageArrayBuffer = await resolveImageArrayBuffer(imagesToUpload[index]);
+    await uploadToGitHub({
+      filePath: imagePaths[index],
+      content: imageArrayBuffer,
+      settings: resolvedSettings,
+      isBinary: true,
+    });
   }
 
   const relativeImagePaths = toRelativeImagePaths(imagePaths, safeCategory);
@@ -382,6 +381,7 @@ async function uploadSelectionToGitHub(payload, settings) {
           notes,
           imagePath: relativeImagePath,
           imagePaths: relativeImagePaths,
+          savedAt: recordSavedAt,
         }),
       });
     }
@@ -395,6 +395,7 @@ async function uploadSelectionToGitHub(payload, settings) {
           notes,
           imagePath: relativeImagePath,
           imagePaths: relativeImagePaths,
+          savedAt: recordSavedAt,
         }),
       });
     }
@@ -408,6 +409,7 @@ async function uploadSelectionToGitHub(payload, settings) {
           imagePaths: relativeImagePaths,
           url,
           notes,
+          savedAt: recordSavedAt,
         }),
       });
     }
@@ -420,17 +422,14 @@ async function uploadSelectionToGitHub(payload, settings) {
           imagePaths: relativeImagePaths,
           url,
           notes,
+          savedAt: recordSavedAt,
         }),
       });
     }
   }
 
-  if (uploads.length > 0) {
-    await Promise.all(
-      uploads.map(({ filePath, content: fileContent }) =>
-        uploadToGitHub({ filePath, content: fileContent, settings: resolvedSettings }),
-      ),
-    );
+  for (const { filePath, content: fileContent } of uploads) {
+    await uploadToGitHub({ filePath, content: fileContent, settings: resolvedSettings });
   }
 
   return { ok: true };
@@ -443,15 +442,15 @@ function toRelativeImagePaths(imagePaths, safeCategory) {
   });
 }
 
-function buildImageOnlyMarkdown({ category, imagePath, imagePaths = [], url, notes }) {
-  const savedAt = new Date().toISOString();
+function buildImageOnlyMarkdown({ category, imagePath, imagePaths = [], url, notes, savedAt }) {
+  const recordSavedAt = savedAt || new Date().toISOString();
   const allPaths = imagePaths.length > 0 ? imagePaths : imagePath ? [imagePath] : [];
   const lines = [
     `# ${category}`,
     '',
     `- **Source URL:** ${url || '-'}`,
     `- **Image:** ![](${imagePath || allPaths[0] || ''})`,
-    `- **Saved At:** ${savedAt}`,
+    `- **Saved At:** ${recordSavedAt}`,
   ];
 
   if (allPaths.length > 1) {
@@ -466,8 +465,8 @@ function buildImageOnlyMarkdown({ category, imagePath, imagePaths = [], url, not
   return lines.join('\n');
 }
 
-function buildImageOnlyContent(format, { category, imagePath, imagePaths = [], url, notes }) {
-  const savedAt = new Date().toISOString();
+function buildImageOnlyContent(format, { category, imagePath, imagePaths = [], url, notes, savedAt }) {
+  const recordSavedAt = savedAt || new Date().toISOString();
   const allPaths = imagePaths.length > 0 ? imagePaths : imagePath ? [imagePath] : [];
   
   if (format === 'json') {
@@ -478,49 +477,76 @@ function buildImageOnlyContent(format, { category, imagePath, imagePaths = [], u
       notes: notes || '',
       image: imagePath || allPaths[0] || '',
       images: allPaths,
-      savedAt,
+      savedAt: recordSavedAt,
     };
     return JSON.stringify(payload, null, 2);
   }
   
-  return buildImageOnlyMarkdown({ category, imagePath, imagePaths: allPaths, url, notes });
+  return buildImageOnlyMarkdown({
+    category,
+    imagePath,
+    imagePaths: allPaths,
+    url,
+    notes,
+    savedAt: recordSavedAt,
+  });
 }
 
-async function uploadToGitHub({ filePath, content, settings, isBinary = false, retryCount = 0 }) {
+/** Contents API conflict / create-race statuses that are safe to refetch-SHA and retry. */
+const MAX_UPLOAD_CONFLICT_RETRIES = 5;
+
+async function uploadToGitHub({
+  filePath,
+  content,
+  settings,
+  isBinary = false,
+  retryCount = 0,
+  encodedContent: cachedEncoded = null,
+  contentSha: cachedContentSha = null,
+}) {
   const { owner, repo, token, branch } = settings.github;
   // URL编码文件路径，确保特殊字符正确处理
   const encodedFilePath = filePath.split('/').map(encodeURIComponent).join('/');
   const endpoint = `https://api.github.com/repos/${owner}/${repo}/contents/${encodedFilePath}`;
-  
-  let encodedContent;
-  if (isBinary) {
-    // 对于二进制文件（图片），直接编码ArrayBuffer
-    console.log('Encoding binary content, ArrayBuffer size:', content.byteLength);
-    encodedContent = base64EncodeBinary(content);
-    console.log('Base64 encoded length:', encodedContent.length);
-    if (!encodedContent || encodedContent.length === 0) {
-      throw new Error('Failed to encode binary content to base64');
+  const headers = {
+    Authorization: `token ${token}`,
+    'User-Agent': 'InfoFlow-Picker',
+    'Accept': 'application/vnd.github.v3+json',
+  };
+
+  let encodedContent = cachedEncoded;
+  let contentSha = cachedContentSha;
+  if (!encodedContent || !contentSha) {
+    if (isBinary) {
+      console.log('Encoding binary content, ArrayBuffer size:', content.byteLength);
+      encodedContent = base64EncodeBinary(content);
+      console.log('Base64 encoded length:', encodedContent.length);
+      if (!encodedContent || encodedContent.length === 0) {
+        throw new Error('Failed to encode binary content to base64');
+      }
+      contentSha = await gitBlobSha(new Uint8Array(content));
+    } else {
+      encodedContent = base64Encode(content);
+      contentSha = await gitBlobSha(new TextEncoder().encode(content));
     }
-  } else {
-    // 对于文本文件
-    encodedContent = base64Encode(content);
   }
-  
+
   // 先尝试获取文件的SHA值（如果文件存在）
   let sha = null;
   try {
     const getResponse = await fetch(`${endpoint}?ref=${encodeURIComponent(branch)}`, {
       method: 'GET',
-      headers: {
-        Authorization: `token ${token}`,
-        'User-Agent': 'InfoFlow-Picker',
-        'Accept': 'application/vnd.github.v3+json',
-      },
+      headers,
     });
     if (getResponse.ok) {
       const fileData = await getResponse.json();
       // GitHub API可能返回单个文件对象或数组，需要处理
       if (fileData.sha) {
+        // Idempotent retry: same path already holds identical bytes — skip PUT.
+        if (fileData.sha === contentSha) {
+          console.log('Skipping upload; remote blob already matches:', filePath);
+          return { ok: true, skipped: true, sha: fileData.sha };
+        }
         sha = fileData.sha;
       } else if (Array.isArray(fileData) && fileData.length > 0) {
         // 如果是数组，说明路径是目录，不应该发生
@@ -535,13 +561,13 @@ async function uploadToGitHub({ filePath, content, settings, isBinary = false, r
     // 如果文件不存在或网络错误，忽略错误，继续创建新文件
     console.log('File does not exist or error getting SHA:', error.message);
   }
-  
+
   const body = {
     message: `InfoFlow: ${filePath}`,
     content: encodedContent,
     branch,
   };
-  
+
   // 如果文件已存在，需要提供SHA值
   if (sha) {
     body.sha = sha;
@@ -550,29 +576,38 @@ async function uploadToGitHub({ filePath, content, settings, isBinary = false, r
   const response = await fetch(endpoint, {
     method: 'PUT',
     headers: {
-      Authorization: `token ${token}`,
+      ...headers,
       'Content-Type': 'application/json',
-      'User-Agent': 'InfoFlow-Picker',
-      'Accept': 'application/vnd.github.v3+json',
     },
     body: JSON.stringify(body),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    
-    // 如果是409错误，尝试重新获取SHA并重试（最多重试2次）
-    if (response.status === 409 && retryCount < 2) {
-      console.log(`409 conflict detected, retrying (attempt ${retryCount + 1}/2)...`);
-      // 等待一小段时间后重试，并重新获取SHA
-      await new Promise(resolve => setTimeout(resolve, 500 + retryCount * 200)); // 递增延迟
-      // 递归重试，会重新获取SHA
-      return uploadToGitHub({ filePath, content, settings, isBinary, retryCount: retryCount + 1 });
+    const conflictLike =
+      response.status === 409 ||
+      (response.status === 422 && /sha|conflict|already exists/i.test(errorText));
+
+    // Refetch SHA and retry: branch-tip races (409) or create-without-sha (422).
+    if (conflictLike && retryCount < MAX_UPLOAD_CONFLICT_RETRIES) {
+      const delayMs = 400 * 2 ** retryCount + Math.floor(Math.random() * 200);
+      console.log(
+        `Upload conflict ${response.status} on ${filePath}, retrying (${retryCount + 1}/${MAX_UPLOAD_CONFLICT_RETRIES}) after ${delayMs}ms...`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return uploadToGitHub({
+        filePath,
+        content,
+        settings,
+        isBinary,
+        retryCount: retryCount + 1,
+        encodedContent,
+        contentSha,
+      });
     }
-    
+
     let errorMessage = `GitHub upload failed: ${errorText}`;
-    
-    // 如果是409错误，提供更详细的提示
+
     if (response.status === 409) {
       try {
         const errorData = JSON.parse(errorText);
@@ -581,13 +616,25 @@ async function uploadToGitHub({ filePath, content, settings, isBinary = false, r
         // 如果解析失败，使用原始错误信息
       }
     }
-    
+
     throw new Error(errorMessage);
   }
+
+  return { ok: true };
 }
 
-function buildContent(format, { category, content, url, notes, imagePath, imagePaths = [] }) {
-  const savedAt = new Date().toISOString();
+/** Git object id for a blob — matches `sha` returned by Contents API. */
+async function gitBlobSha(bytes) {
+  const header = new TextEncoder().encode(`blob ${bytes.byteLength}\0`);
+  const payload = new Uint8Array(header.byteLength + bytes.byteLength);
+  payload.set(header, 0);
+  payload.set(bytes, header.byteLength);
+  const digest = await crypto.subtle.digest('SHA-1', payload);
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function buildContent(format, { category, content, url, notes, imagePath, imagePaths = [], savedAt }) {
+  const recordSavedAt = savedAt || new Date().toISOString();
   const allPaths = imagePaths.length > 0 ? imagePaths : imagePath ? [imagePath] : [];
   
   if (format === 'json') {
@@ -598,7 +645,7 @@ function buildContent(format, { category, content, url, notes, imagePath, imageP
       notes: notes || '',
       image: imagePath || allPaths[0] || '',
       images: allPaths,
-      savedAt,
+      savedAt: recordSavedAt,
     };
     return JSON.stringify(payload, null, 2);
   }
@@ -606,7 +653,7 @@ function buildContent(format, { category, content, url, notes, imagePath, imageP
   const metaLines = [
     `- **Category:** ${category}`,
     `- **Source URL:** ${url || '-'}`,
-    `- **Saved At:** ${savedAt}`,
+    `- **Saved At:** ${recordSavedAt}`,
   ];
   
   if (imagePath || allPaths[0]) {
