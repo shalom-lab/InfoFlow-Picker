@@ -155,6 +155,12 @@ test('mixed images reach the GitHub upload boundary and metadata references the 
     resolveImageArrayBuffer,
     imageExtension,
     uploadToGitHub: async (upload) => uploads.push(upload),
+    DEFAULT_LANGUAGE: 'zh',
+    tSync: (_locale, key, vars = {}) => {
+      if (key === 'syncMsgUploadImage') return `upload ${vars.current}/${vars.total}`;
+      if (key === 'syncMsgUploadFile') return `upload ${vars.name}`;
+      return key;
+    },
   });
   vm.runInContext(background.slice(background.indexOf('function buildUploadPlan('), background.indexOf('async function uploadToGitHub(')), context);
   vm.runInContext(background.slice(background.indexOf('function buildContent('), background.indexOf('function base64Encode(')), context);

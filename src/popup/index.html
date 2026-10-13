@@ -260,6 +260,10 @@
         background: #dbeafe;
         color: #1d4ed8;
       }
+      .sync-queue-badge[data-status='done'] {
+        background: #d1fae5;
+        color: #047857;
+      }
       .sync-queue-preview {
         color: #334155;
         overflow: hidden;
@@ -267,6 +271,54 @@
         white-space: nowrap;
         min-width: 0;
         flex: 1;
+      }
+      .sync-queue-repo-link {
+        grid-column: 1 / -1;
+        color: #9a3412;
+        font-size: 11px;
+        font-weight: 600;
+        text-decoration: none;
+        width: fit-content;
+      }
+      .sync-queue-repo-link:hover {
+        text-decoration: underline;
+        color: #7c2d12;
+      }
+      .sync-queue-message {
+        grid-column: 1 / -1;
+        color: #475569;
+        font-size: 10px;
+        line-height: 1.4;
+        word-break: break-word;
+      }
+      .sync-queue-message[data-tone='error'] {
+        color: #b91c1c;
+      }
+      .sync-queue-message[data-tone='success'] {
+        color: #047857;
+      }
+      .sync-queue-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        align-items: stretch;
+      }
+      .sync-queue-retry {
+        width: auto;
+        min-width: 44px;
+        padding: 3px 8px;
+        font-size: 10px;
+        border-radius: 999px;
+        background: #fff7ed;
+        color: #c2410c;
+        border: 1px solid #fdba74;
+        box-shadow: none;
+        margin: 0;
+      }
+      .sync-queue-retry:hover:not(:disabled) {
+        background: #ffedd5;
+        box-shadow: none;
+        transform: none;
       }
       .sync-queue-error {
         grid-column: 1 / -1;

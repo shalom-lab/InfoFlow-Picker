@@ -102,7 +102,11 @@ async function init() {
   await Promise.all([loadSavedFormState(), loadSourceUrl()]);
   loadSettingsForm(settings);
   await refreshSyncStatus();
-  
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes.syncQueue) return;
+    refreshSyncStatus().catch((err) => console.error('Sync status refresh failed:', err));
+  });
+
   optionsBtn.addEventListener('click', toggleView);
   saveBtn.addEventListener('click', handleSave);
   saveSettingsBtn.addEventListener('click', handleSaveSettings);
@@ -1130,7 +1134,8 @@ async function refreshSyncStatus() {
       if (statusState.key === 'statusQueued') return;
       if (
         statusState.key === 'statusSyncPending' ||
-        statusState.key === 'statusSyncFailed'
+        statusState.key === 'statusSyncFailed' ||
+        statusState.key === 'statusSuccess'
       ) {
         setStatus('statusIdle', 'muted');
       }
@@ -1141,13 +1146,29 @@ async function refreshSyncStatus() {
       retrySyncBtn.style.display = summary.failed > 0 || summary.pending > 0 ? 'block' : 'none';
     }
 
-    // Don't override the just-queued success message immediately.
-    if (statusState.key === 'statusQueued') return;
+    // Keep the brief "queued" toast only until the first real progress/failure arrives.
+    if (statusState.key === 'statusQueued' && summary.pending > 0 && summary.failed === 0) {
+      const uploading = summary.items?.some((item) => item.status === 'uploading');
+      if (!uploading) return;
+    }
 
-    if (summary.failed > 0) {
+    if (summary.failed > 0 && summary.pending > 0) {
+      setStatus('statusSyncMixed', 'error', {
+        pending: summary.pending,
+        failed: summary.failed,
+      });
+    } else if (summary.failed > 0) {
       setStatus('statusSyncFailed', 'error', { n: summary.failed });
     } else if (summary.pending > 0) {
       setStatus('statusSyncPending', 'progress', { n: summary.pending });
+    } else if (summary.done > 0) {
+      setStatus('statusSuccess', 'success');
+      // Reveal the GitHub link list once everything finishes.
+      if (!syncQueueExpanded) {
+        syncQueueExpanded = true;
+        if (syncQueueList) syncQueueList.classList.add('expanded');
+        updateSyncQueueToggleLabel();
+      }
     }
   } catch (error) {
     console.error('Failed to load sync status:', error);
@@ -1178,6 +1199,11 @@ async function renderSyncQueue(summary) {
     return;
   }
 
+  // Auto-expand while work needs attention; allow the user to collapse done-only lists.
+  if (summary.pending > 0 || summary.failed > 0) {
+    syncQueueExpanded = true;
+  }
+
   syncQueuePanel.classList.add('visible');
   syncQueueList.classList.toggle('expanded', syncQueueExpanded);
   updateSyncQueueToggleLabel();
@@ -1186,6 +1212,7 @@ async function renderSyncQueue(summary) {
     pending: t(currentLanguage, 'syncQueueStatusPending'),
     uploading: t(currentLanguage, 'syncQueueStatusUploading'),
     failed: t(currentLanguage, 'syncQueueStatusFailed'),
+    done: t(currentLanguage, 'syncQueueStatusDone'),
   };
 
   syncQueueList.innerHTML = '';
@@ -1194,8 +1221,10 @@ async function renderSyncQueue(summary) {
     row.className = 'sync-queue-item';
     row.setAttribute('role', 'listitem');
     row.dataset.id = item.id;
+    const isDone = item.status === 'done';
+    const isFailed = item.status === 'failed';
 
-    const imageSources = await getQueueItemImageSources(item.payload);
+    const imageSources = isDone ? [] : await getQueueItemImageSources(item.payload);
     const objectUrls = imageSources.filter((src) => src.startsWith('blob:'));
     if (generation !== syncQueueRenderGeneration) {
       objectUrls.forEach((src) => URL.revokeObjectURL(src));
@@ -1240,17 +1269,31 @@ async function renderSyncQueue(summary) {
 
     const preview = document.createElement('span');
     preview.className = 'sync-queue-preview';
-    const raw = (item.payload?.content || '').trim().replace(/\s+/g, ' ');
-    preview.textContent = raw
-      ? (raw.length > 48 ? `${raw.slice(0, 48)}…` : raw)
-      : (imageSources.length
-        ? tFmt('syncQueueImagesCount', { n: imageSources.length })
-        : t(currentLanguage, 'syncQueueEmptyPreview'));
-    preview.title = raw || preview.textContent;
+    const imageCount = item.imageCount
+      || (Array.isArray(item.payload?.images) ? item.payload.images.length : 0)
+      || imageSources.length;
+    const repo = item.repo || '';
+    if (isDone) {
+      preview.textContent = imageCount > 0
+        ? tFmt('syncQueueDoneSummary', { repo, n: imageCount })
+        : tFmt('syncQueueDoneSummaryNoImages', { repo });
+    } else if (repo) {
+      preview.textContent = imageCount > 0
+        ? tFmt('syncQueueActiveSummary', { repo, n: imageCount })
+        : repo;
+    } else {
+      const raw = (item.payload?.content || '').trim().replace(/\s+/g, ' ');
+      preview.textContent = raw
+        ? (raw.length > 48 ? `${raw.slice(0, 48)}…` : raw)
+        : (imageCount
+          ? tFmt('syncQueueImagesCount', { n: imageCount })
+          : t(currentLanguage, 'syncQueueEmptyPreview'));
+    }
+    preview.title = preview.textContent;
 
     meta.append(badge, preview);
 
-    if (item.attempts > 0) {
+    if (!isDone && item.attempts > 0) {
       const attempts = document.createElement('span');
       attempts.style.color = '#94a3b8';
       attempts.style.fontSize = '10px';
@@ -1258,26 +1301,57 @@ async function renderSyncQueue(summary) {
       meta.appendChild(attempts);
     }
 
+    const actions = document.createElement('div');
+    actions.className = 'sync-queue-actions';
+
+    if (isFailed) {
+      const retryBtn = document.createElement('button');
+      retryBtn.type = 'button';
+      retryBtn.className = 'sync-queue-retry';
+      retryBtn.dataset.action = 'retry';
+      retryBtn.dataset.id = item.id;
+      retryBtn.textContent = t(currentLanguage, 'syncQueueRetry');
+      actions.appendChild(retryBtn);
+    }
+
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
     cancelBtn.className = 'sync-queue-cancel';
     cancelBtn.dataset.action = 'cancel';
     cancelBtn.dataset.id = item.id;
-    cancelBtn.textContent = t(currentLanguage, 'syncQueueCancel');
+    cancelBtn.textContent = t(
+      currentLanguage,
+      isDone ? 'syncQueueDismiss' : 'syncQueueCancel',
+    );
+    actions.appendChild(cancelBtn);
 
     if (imageSources.length) {
-      row.append(thumbs, meta, cancelBtn);
+      row.append(thumbs, meta, actions);
     } else {
       row.style.gridTemplateColumns = '1fr auto';
-      row.append(meta, cancelBtn);
+      row.append(meta, actions);
     }
 
-    if (item.lastError) {
-      const err = document.createElement('div');
-      err.className = 'sync-queue-error';
-      err.textContent = item.lastError;
-      err.title = item.lastError;
-      row.appendChild(err);
+    const progressText = item.message
+      || (isFailed ? item.lastError : '')
+      || '';
+    if (progressText) {
+      const msg = document.createElement('div');
+      msg.className = 'sync-queue-message';
+      msg.dataset.tone = isFailed ? 'error' : isDone ? 'success' : 'info';
+      msg.textContent = progressText;
+      msg.title = item.lastError || progressText;
+      row.appendChild(msg);
+    }
+
+    if (isDone && item.resultUrl?.startsWith('https://github.com/')) {
+      const link = document.createElement('a');
+      link.className = 'sync-queue-repo-link';
+      link.href = item.resultUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = t(currentLanguage, 'syncQueueViewRepo');
+      row.appendChild(link);
     }
 
     syncQueueList.appendChild(row);
@@ -1303,6 +1377,26 @@ async function handleSyncQueueListClick(event) {
     return;
   }
 
+  const retryEl = event.target.closest('[data-action="retry"]');
+  if (retryEl?.dataset.id) {
+    retryEl.disabled = true;
+    try {
+      setStatus('statusSaving', 'progress');
+      const summary = await browser.runtime.sendMessage({
+        type: 'RETRY_SYNC_ITEM',
+        id: retryEl.dataset.id,
+      });
+      lastSyncSummary = summary;
+      await renderSyncQueue(summary);
+      await refreshSyncStatus();
+    } catch (error) {
+      console.error('Retry sync item failed:', error);
+      setStatus('statusErrorDetails', 'error', { message: error?.message || String(error) });
+      retryEl.disabled = false;
+    }
+    return;
+  }
+
   const btn = event.target.closest('[data-action="cancel"]');
   if (!btn?.dataset.id) return;
   btn.disabled = true;
@@ -1321,10 +1415,17 @@ async function handleSyncQueueListClick(event) {
     if (retrySyncBtn) {
       retrySyncBtn.style.display = summary.failed > 0 || summary.pending > 0 ? 'block' : 'none';
     }
-    if (summary.failed > 0) {
+    if (summary.failed > 0 && summary.pending > 0) {
+      setStatus('statusSyncMixed', 'error', {
+        pending: summary.pending,
+        failed: summary.failed,
+      });
+    } else if (summary.failed > 0) {
       setStatus('statusSyncFailed', 'error', { n: summary.failed });
     } else if (summary.pending > 0) {
       setStatus('statusSyncPending', 'progress', { n: summary.pending });
+    } else if (summary.done > 0) {
+      setStatus('statusSuccess', 'success');
     } else {
       setStatus('statusIdle', 'muted');
     }

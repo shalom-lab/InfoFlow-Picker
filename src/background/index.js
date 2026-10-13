@@ -4,6 +4,7 @@ import browser from 'webextension-polyfill';
 import { getSettings } from '../utils/storage.js';
 import { PENDING_CAPTURE_KEY } from '../utils/draft.js';
 import { sendToContentScript } from '../utils/injectContent.js';
+import { t, DEFAULT_LANGUAGE } from '../i18n/index.js';
 import {
   SYNC_ALARM_NAME,
   MAX_SYNC_ATTEMPTS,
@@ -12,10 +13,23 @@ import {
   getSyncSummary,
   updateSyncItem,
   removeSyncItem,
+  completeSyncItem,
+  pickRunnableItems,
   scheduleSyncAlarm,
   nextRetryDelayMinutes,
+  nextRetryDelayMs,
   updateSyncBadge,
 } from '../utils/syncQueue.js';
+
+function tSync(locale, key, vars = null) {
+  let text = t(locale || DEFAULT_LANGUAGE, key);
+  if (vars) {
+    for (const [name, value] of Object.entries(vars)) {
+      text = text.replace(new RegExp(`\\{${name}\\}`, 'g'), String(value));
+    }
+  }
+  return text;
+}
 
 const CONTEXT_MENU_ID = 'infoflow-extract';
 
@@ -108,20 +122,53 @@ browser.runtime.onMessage.addListener((message) => {
     return enqueueSaveSelection(message.payload);
   }
   if (message?.type === 'GET_SYNC_STATUS') {
+    // Popup open / poll: wake any runnable jobs without blocking the status reply path.
+    processSyncQueue().catch((err) => console.error('Sync kick failed:', err));
     return getSyncSummary();
+  }
+  if (message?.type === 'KICK_SYNC') {
+    return (async () => {
+      await processSyncQueue();
+      return getSyncSummary();
+    })();
   }
   if (message?.type === 'RETRY_SYNC') {
     return (async () => {
+      const settings = await getSettings();
+      const locale = settings.language || DEFAULT_LANGUAGE;
       const queue = await getSyncQueue();
+      // Do not touch in-flight "uploading" items — resetting them races the worker.
       for (const item of queue) {
-        if (item.status === 'failed' || item.status === 'pending' || item.status === 'uploading') {
+        if (item.status === 'failed' || item.status === 'pending') {
           await updateSyncItem(item.id, {
             status: 'pending',
             attempts: 0,
             lastError: null,
+            nextAttempt: 0,
+            message: tSync(locale, 'syncMsgRetryWait'),
           });
         }
       }
+      await processSyncQueue();
+      return getSyncSummary();
+    })();
+  }
+  if (message?.type === 'RETRY_SYNC_ITEM' && message.id) {
+    return (async () => {
+      const settings = await getSettings();
+      const locale = settings.language || DEFAULT_LANGUAGE;
+      const queue = await getSyncQueue();
+      const item = queue.find((row) => row.id === message.id);
+      if (!item || (item.status !== 'failed' && item.status !== 'pending')) {
+        return getSyncSummary();
+      }
+      await updateSyncItem(item.id, {
+        status: 'pending',
+        attempts: 0,
+        lastError: null,
+        nextAttempt: 0,
+        message: tSync(locale, 'syncMsgRetryWait'),
+      });
       await processSyncQueue();
       return getSyncSummary();
     })();
@@ -138,9 +185,18 @@ browser.runtime.onMessage.addListener((message) => {
 /** Validate + persist locally, return immediately; upload continues in background. */
 async function enqueueSaveSelection(payload) {
   const normalized = normalizeSavePayload(payload);
-  await assertGithubSettings();
+  const settings = await assertGithubSettings();
+  const locale = settings.language || DEFAULT_LANGUAGE;
 
   const item = await enqueueSync(normalized);
+  const imageCount = Array.isArray(normalized.images) ? normalized.images.length : 0;
+  await updateSyncItem(item.id, {
+    repo: `${settings.github.owner}/${settings.github.repo}`,
+    imageCount,
+    message: imageCount > 0
+      ? tSync(locale, 'syncMsgQueuedImages', { n: imageCount })
+      : tSync(locale, 'syncMsgQueued'),
+  });
   // Kick upload without blocking the popup response path beyond enqueue.
   processSyncQueue().catch((err) => console.error('Sync queue error:', err));
   await scheduleSyncAlarm(0.2);
@@ -211,70 +267,167 @@ async function assertGithubSettings() {
 }
 
 /** How long an "uploading" item may sit before we treat the SW as killed mid-flight. */
-const STUCK_UPLOADING_MS = 2 * 60 * 1000;
+const STUCK_UPLOADING_MS = 90 * 1000;
 
 async function processSyncQueue() {
   if (syncProcessing) return;
   syncProcessing = true;
 
   try {
+    const settingsForLocale = await getSettings();
+    const locale = settingsForLocale.language || DEFAULT_LANGUAGE;
+
     // Only reclaim items left "uploading" after an MV3 SW kill — not mid-flight peers.
     const now = Date.now();
     const queue = await getSyncQueue();
     for (const item of queue) {
       if (item.status === 'uploading' && now - (item.updatedAt || 0) >= STUCK_UPLOADING_MS) {
-        await updateSyncItem(item.id, { status: 'pending' });
+        await updateSyncItem(item.id, {
+          status: 'pending',
+          nextAttempt: 0,
+          message: tSync(locale, 'syncMsgInterrupted'),
+        });
       }
     }
 
+    let earliestBackoffMs = null;
+
     while (true) {
       const current = await getSyncQueue();
-      const next = current.find(
-        (item) =>
-          (item.status === 'pending' || item.status === 'failed') &&
-          item.attempts < MAX_SYNC_ATTEMPTS,
-      );
-      if (!next) break;
+      const runnable = pickRunnableItems(current);
+      const next = runnable[0];
+      if (!next) {
+        // Schedule wake for the soonest failed/backoff item.
+        for (const item of current) {
+          if (
+            (item.status === 'failed' || item.status === 'pending') &&
+            (item.attempts || 0) < MAX_SYNC_ATTEMPTS &&
+            (item.nextAttempt || 0) > Date.now()
+          ) {
+            const wait = (item.nextAttempt || 0) - Date.now();
+            if (earliestBackoffMs == null || wait < earliestBackoffMs) {
+              earliestBackoffMs = wait;
+            }
+          }
+        }
+        break;
+      }
 
-      const settings = await assertGithubSettings();
+      let settings;
+      try {
+        settings = await assertGithubSettings();
+      } catch (error) {
+        const message = error?.message || String(error);
+        const hint = shortError(message, locale);
+        // Settings block the whole queue — mark every runnable item so none look "stuck".
+        for (const item of runnable) {
+          await updateSyncItem(item.id, {
+            status: 'failed',
+            lastError: message,
+            message: tSync(locale, 'syncMsgSettings', { hint }),
+            nextAttempt: Date.now() + nextRetryDelayMs(1),
+          });
+        }
+        earliestBackoffMs = nextRetryDelayMs(1);
+        break;
+      }
+
       // Freeze target paths once so retries overwrite the same files instead of
       // creating new timestamp/random filenames (which caused duplicate images).
       const uploadPlan = next.payload.uploadPlan ?? buildUploadPlan(next.payload, settings);
       const payload = { ...next.payload, uploadPlan };
+      const attempts = (next.attempts || 0) + 1;
 
       await updateSyncItem(next.id, {
         status: 'uploading',
-        attempts: next.attempts + 1,
+        attempts,
         payload,
+        lastError: null,
+        nextAttempt: 0,
+        repo: `${settings.github.owner}/${settings.github.repo}`,
+        imageCount: Array.isArray(payload.images) ? payload.images.length : 0,
+        message: tSync(locale, 'syncMsgConnecting'),
       });
 
       try {
-        await uploadSelectionToGitHub(payload, settings);
-        await removeSyncItem(next.id);
+        await uploadSelectionToGitHub(payload, settings, {
+          locale,
+          onProgress: async (message) => {
+            await updateSyncItem(next.id, { message, status: 'uploading' });
+          },
+        });
+        const { owner, repo, branch } = settings.github;
+        const viewPath =
+          uploadPlan.mdPath || uploadPlan.jsonPath || uploadPlan.imagePaths?.[0] || null;
+        const imageCount = Array.isArray(payload.images) ? payload.images.length : 0;
+        await completeSyncItem(next.id, {
+          resultUrl: viewPath
+            ? buildGithubBlobUrl({ owner, repo, branch, filePath: viewPath })
+            : null,
+          repo: `${owner}/${repo}`,
+          imageCount,
+          message: imageCount > 0
+            ? tSync(locale, 'syncMsgDone')
+            : tSync(locale, 'syncMsgDoneNoImages'),
+        });
       } catch (error) {
-        const message = error?.message || String(error);
-        console.error('Sync item failed:', next.id, message);
-        const attempts = next.attempts + 1;
+        const raw = error?.message || String(error);
+        console.error('Sync item failed:', next.id, raw);
+        const hint = shortError(raw, locale);
+        const willRetry = attempts < MAX_SYNC_ATTEMPTS;
+        const delayMs = nextRetryDelayMs(attempts);
         await updateSyncItem(next.id, {
           status: 'failed',
-          lastError: message,
+          lastError: raw,
           attempts,
           payload,
+          nextAttempt: willRetry ? Date.now() + delayMs : Number.MAX_SAFE_INTEGER,
+          message: willRetry
+            ? tSync(locale, 'syncMsgFailRetry', { hint })
+            : tSync(locale, 'syncMsgFailGiveUp', { hint }),
         });
-        await scheduleSyncAlarm(nextRetryDelayMinutes(attempts));
-        // Stop this pass; alarm will retry so we don't tight-loop on bad network.
-        break;
+        if (earliestBackoffMs == null || delayMs < earliestBackoffMs) {
+          earliestBackoffMs = delayMs;
+        }
+        // Continue with other pending items — do not stall the whole queue.
       }
     }
 
-    const summary = await getSyncSummary();
-    if (summary.pending > 0 || summary.failed > 0) {
-      await scheduleSyncAlarm(nextRetryDelayMinutes(1));
+    if (earliestBackoffMs != null) {
+      await scheduleSyncAlarm(Math.max(earliestBackoffMs / 60_000, 0.1));
+    } else {
+      const summary = await getSyncSummary();
+      if (summary.pending > 0 || summary.failed > 0) {
+        await scheduleSyncAlarm(nextRetryDelayMinutes(1));
+      }
     }
     await updateSyncBadge();
   } finally {
     syncProcessing = false;
   }
+}
+
+/** Keep queue messages short and readable in the popup. */
+function shortError(message, locale = DEFAULT_LANGUAGE) {
+  const text = String(message || '').trim();
+  if (!text) return tSync(locale, 'syncErrUploadFailed');
+  if (/Missing GitHub settings/i.test(text)) return tSync(locale, 'syncErrMissingSettings');
+  if (/401|Bad credentials|Unauthorized/i.test(text)) return tSync(locale, 'syncErrToken');
+  if (/403|rate limit|Abuse/i.test(text)) return tSync(locale, 'syncErrRateLimit');
+  if (/404|Not Found/i.test(text)) return tSync(locale, 'syncErrNotFound');
+  if (/File conflict \(409\)|409/i.test(text)) return tSync(locale, 'syncErrConflict');
+  if (/Failed to fetch|NetworkError|network/i.test(text)) return tSync(locale, 'syncErrNetwork');
+  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+}
+
+/** GitHub web URL for a file on the configured branch (doubao-download style). */
+function buildGithubBlobUrl({ owner, repo, branch, filePath }) {
+  const encodedPath = String(filePath)
+    .split('/')
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/');
+  return `https://github.com/${owner}/${repo}/blob/${encodeURIComponent(branch)}/${encodedPath}`;
 }
 
 /**
@@ -328,7 +481,18 @@ function buildUploadPlan(payload, settings) {
   };
 }
 
-async function uploadSelectionToGitHub(payload, settings) {
+async function uploadSelectionToGitHub(payload, settings, { onProgress, locale } = {}) {
+  locale = locale || DEFAULT_LANGUAGE;
+  const report = async (message) => {
+    if (typeof onProgress === 'function') {
+      try {
+        await onProgress(message);
+      } catch {
+        // Progress UI updates must never abort the upload itself.
+      }
+    }
+  };
+
   const content = payload?.content?.trim() || '';
   const category = payload?.category?.trim();
   const url = payload?.url?.trim() || '';
@@ -356,7 +520,9 @@ async function uploadSelectionToGitHub(payload, settings) {
 
   // Serial uploads: GitHub Contents API commits against the branch tip; parallel
   // PUTs race and surface as 409 "is at X but expected Y" even for different paths.
-  for (let index = 0; index < imagesToUpload.length; index++) {
+  const imageTotal = imagesToUpload.length;
+  for (let index = 0; index < imageTotal; index++) {
+    await report(tSync(locale, 'syncMsgUploadImage', { current: index + 1, total: imageTotal }));
     const imageArrayBuffer = await resolveImageArrayBuffer(imagesToUpload[index]);
     await uploadToGitHub({
       filePath: imagePaths[index],
@@ -429,6 +595,8 @@ async function uploadSelectionToGitHub(payload, settings) {
   }
 
   for (const { filePath, content: fileContent } of uploads) {
+    const name = filePath.split('/').pop() || filePath;
+    await report(tSync(locale, 'syncMsgUploadFile', { name }));
     await uploadToGitHub({ filePath, content: fileContent, settings: resolvedSettings });
   }
 
