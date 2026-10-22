@@ -21,6 +21,7 @@ import { t } from '../i18n/index.js';
 import { sendToContentScript } from '../utils/injectContent.js';
 
 const contentEl = document.getElementById('content');
+const contentPasteBtn = document.getElementById('content-paste-btn');
 const sourceUrlEl = document.getElementById('source-url');
 const categoryEl = document.getElementById('category');
 const notesEl = document.getElementById('notes');
@@ -113,6 +114,7 @@ async function init() {
   retrySyncBtn?.addEventListener('click', handleRetrySync);
   syncQueueToggle?.addEventListener('click', handleSyncQueueToggle);
   syncQueueList?.addEventListener('click', handleSyncQueueListClick);
+  contentPasteBtn?.addEventListener('click', handlePasteContentClick);
   imageSelectBtn.addEventListener('click', () => imageInput.click());
   imagePasteBtn?.addEventListener('click', handlePasteImageClick);
   imageInput.addEventListener('change', handleImageSelect);
@@ -173,6 +175,10 @@ function applyTranslations() {
     currentLanguage,
     'contentLabel',
   );
+  if (contentPasteBtn) {
+    contentPasteBtn.textContent = t(currentLanguage, 'pasteContentButton');
+    contentPasteBtn.title = t(currentLanguage, 'pasteContentButton');
+  }
   document.getElementById('category-label').textContent = t(
     currentLanguage,
     'categoryLabel',
@@ -403,6 +409,27 @@ async function readClipboardText() {
   } catch {
     // Permission denied or clipboard unavailable.
     return '';
+  }
+}
+
+async function handlePasteContentClick() {
+  try {
+    if (!navigator.clipboard?.readText) {
+      setStatus('clipboardTextPasteFailed', 'error');
+      return;
+    }
+    const clip = (await navigator.clipboard.readText())?.trim() || '';
+    if (!clip) {
+      setStatus('clipboardNoText', 'error');
+      return;
+    }
+    contentEl.value = clip;
+    contentEl.dispatchEvent(new Event('input', { bubbles: true }));
+    await persistDraftNow();
+    setStatus('clipboardTextPasteSuccess', 'success');
+  } catch (error) {
+    console.error('Clipboard text paste failed:', error);
+    setStatus('clipboardTextPasteFailed', 'error');
   }
 }
 
