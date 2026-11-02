@@ -610,26 +610,62 @@ function toRelativeImagePaths(imagePaths, safeCategory) {
   });
 }
 
+const IMAGES_PER_MARKDOWN_ROW = 5;
+
+function imageAltFromPath(imagePath) {
+  const fileName = String(imagePath).split('/').pop() || String(imagePath);
+  const dot = fileName.lastIndexOf('.');
+  return dot > 0 ? fileName.slice(0, dot) : fileName;
+}
+
+function escapeHtmlAttr(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
+}
+
+/** Primary image first, then the rest of `images` without repeating it. */
+function orderImagePaths(imagePath, imagePaths = []) {
+  const all = (Array.isArray(imagePaths) && imagePaths.length > 0 ? imagePaths : imagePath ? [imagePath] : [])
+    .filter(Boolean);
+  if (!imagePath) return all;
+  return [imagePath, ...all.filter((path) => path !== imagePath)];
+}
+
+function buildImagesTable(imagePath, imagePaths = []) {
+  const ordered = orderImagePaths(imagePath, imagePaths);
+  if (ordered.length === 0) return '';
+  const rows = [];
+  for (let index = 0; index < ordered.length; index += IMAGES_PER_MARKDOWN_ROW) {
+    const cells = ordered.slice(index, index + IMAGES_PER_MARKDOWN_ROW).map((path) => {
+      const href = escapeHtmlAttr(path);
+      const alt = escapeHtmlAttr(imageAltFromPath(path));
+      return `<td><a href="${href}"><img src="${href}" height="240" alt="${alt}"></a></td>`;
+    });
+    rows.push(`<tr>\n${cells.join('\n')}\n</tr>`);
+  }
+  return `<table>\n${rows.join('\n')}\n</table>`;
+}
+
 function buildImageOnlyMarkdown({ category, imagePath, imagePaths = [], url, notes, savedAt }) {
   const recordSavedAt = savedAt || new Date().toISOString();
-  const allPaths = imagePaths.length > 0 ? imagePaths : imagePath ? [imagePath] : [];
-  const lines = [
+  const gallery = buildImagesTable(imagePath, imagePaths);
+  const lines = [];
+  if (gallery) {
+    lines.push(gallery, '');
+  }
+  lines.push(
     `# ${category}`,
     '',
     `- **Source URL:** ${url || '-'}`,
-    `- **Image:** ![](${imagePath || allPaths[0] || ''})`,
     `- **Saved At:** ${recordSavedAt}`,
-  ];
+  );
 
-  if (allPaths.length > 1) {
-    lines.push('', '## Images', '');
-    allPaths.forEach((p) => lines.push(`![](${p})`, ''));
-  }
-  
   if (notes) {
     lines.push('', '---', '', '## Notes', '', notes);
   }
-  
+
   return lines.join('\n');
 }
 
@@ -818,37 +854,29 @@ function buildContent(format, { category, content, url, notes, imagePath, imageP
     return JSON.stringify(payload, null, 2);
   }
   
-  const metaLines = [
+  const gallery = buildImagesTable(imagePath, imagePaths);
+  const lines = [];
+  if (gallery) {
+    lines.push(gallery, '');
+  }
+  lines.push(
+    `# ${category}`,
+    '',
     `- **Category:** ${category}`,
     `- **Source URL:** ${url || '-'}`,
     `- **Saved At:** ${recordSavedAt}`,
-  ];
-  
-  if (imagePath || allPaths[0]) {
-    metaLines.splice(2, 0, `- **Image:** ![](${imagePath || allPaths[0]})`);
-  }
-  
-  const lines = [
-    `# ${category}`,
-    '',
-    ...metaLines,
     '',
     '---',
     '',
     '## Content',
     '',
     content,
-  ];
+  );
 
-  if (allPaths.length > 1) {
-    lines.push('', '## Images', '');
-    allPaths.forEach((p) => lines.push(`![](${p})`, ''));
-  }
-  
   if (notes) {
     lines.push('', '## Notes', '', notes);
   }
-  
+
   return lines.join('\n');
 }
 

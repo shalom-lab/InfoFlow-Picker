@@ -182,5 +182,44 @@ test('mixed images reach the GitHub upload boundary and metadata references the 
   const json = JSON.parse(uploads.find((upload) => upload.filePath.endsWith('.json')).content);
   assert.equal(json.images.length, 3);
   assert.equal(json.image, json.images[2]);
-  assert.ok(uploads.find((upload) => upload.filePath.endsWith('.md')).content.includes(json.image));
+  const markdown = uploads.find((upload) => upload.filePath.endsWith('.md')).content;
+  assert.ok(markdown.startsWith('<table>\n'));
+  assert.ok(markdown.indexOf(json.image) < markdown.indexOf(json.images[0]));
+  assert.equal(markdown.includes('- **Image:**'), false);
+  assert.equal(markdown.includes('## Images'), false);
+});
+
+test('markdown gallery puts the primary image first and wraps every five images', () => {
+  const context = vm.createContext({});
+  vm.runInContext(background.slice(background.indexOf('const IMAGES_PER_MARKDOWN_ROW'), background.indexOf('async function uploadToGitHub(')), context);
+  vm.runInContext(background.slice(background.indexOf('function buildContent('), background.indexOf('function base64Encode(')), context);
+  const paths = [0, 1, 2, 3, 4, 5].map((index) => `../Images/Prompt/file-${index}.jpg`);
+  const markdown = context.buildContent('md', {
+    category: 'Prompt',
+    content: 'body',
+    url: 'https://example.com',
+    notes: '',
+    imagePath: paths[2],
+    imagePaths: paths,
+    savedAt: '2026-11-02T05:25:36.335Z',
+  });
+  const firstRow = markdown.slice(markdown.indexOf('<tr>'), markdown.indexOf('</tr>'));
+  assert.equal(firstRow.split('<td>').length - 1, 5);
+  assert.deepEqual(
+    [...firstRow.matchAll(/alt="([^"]+)"/g)].map((match) => match[1]),
+    ['file-2', 'file-0', 'file-1', 'file-3', 'file-4'],
+  );
+  assert.equal(markdown.split('<tr>').length - 1, 2);
+  assert.match(markdown, /height="240"/);
+  const imageOnly = context.buildImageOnlyMarkdown({
+    category: 'Prompt',
+    imagePath: paths[2],
+    imagePaths: paths,
+    url: '',
+    notes: '',
+    savedAt: '2026-11-02T05:25:36.335Z',
+  });
+  assert.ok(imageOnly.startsWith('<table>\n'));
+  assert.ok(imageOnly.includes('- **Source URL:** -'));
+  assert.equal(imageOnly.includes('## Images'), false);
 });
